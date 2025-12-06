@@ -1,0 +1,52 @@
+CC = g++
+LD = $(CC)
+
+.SUFFIXES:
+.SUFFIXES: .o .c .h .cl .cpp
+
+VERSION_MAJOR := 0
+VERSION_MINOR := 1
+date := $(shell date +%Y%m%d)
+
+APP = RSSieve-linux64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date)
+
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/giant.cl kernels/init.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl putil.c putil.h verify_factor.c verify_factor.h
+KERNEL_HEADERS = kernels/giant.h kernels/init.h kernels/clearn.h kernels/clearresult.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h
+OBJ = main.o cl_sieve.o simpleCL.o putil.o verify_factor.o
+
+OCL_INC = -I /usr/local/cuda/include/CL/
+OCL_LIB = -L . -L /usr/local/cuda-10.1/targets/x86_64-linux/lib -lOpenCL
+
+BOINC_DIR = /home/bryan/boinc
+BOINC_INC = -I$(BOINC_DIR)/lib -I$(BOINC_DIR)/api -I$(BOINC_DIR)
+BOINC_LIB = -L$(BOINC_DIR)/lib -L$(BOINC_DIR)/api -L$(BOINC_DIR) -lboinc_opencl -lboinc_api -lboinc -lpthread
+
+CFLAGS  = -I . -I kernels -O3 -m64 -Wall -DVERSION_MAJOR=\"$(VERSION_MAJOR)\" -DVERSION_MINOR=\"$(VERSION_MINOR)\"
+LDFLAGS = $(CFLAGS) -static-libgcc -static-libstdc++
+
+all : clean $(APP)
+
+$(APP) : $(OBJ)
+	$(LD) $(LDFLAGS) $^ $(OCL_LIB) $(BOINC_LIB) -o $@
+
+main.o : $(SRC)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ main.cpp
+
+cl_sieve.o : $(SRC) $(KERNEL_HEADERS)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ cl_sieve.cpp
+
+simpleCL.o : $(SRC)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ simpleCL.c
+
+putil.o : $(SRC)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ putil.c
+
+verifyprime.o : $(SRC)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ verifyprime.cpp
+
+.cl.h:
+	./cltoh.pl $< > $@
+
+clean :
+	rm -f *.o kernels/*.h $(APP)
+
