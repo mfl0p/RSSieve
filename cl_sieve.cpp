@@ -99,7 +99,7 @@ void write_state( workStatus & st, searchData & sd ){
 
 	FILE * out;
 
-	st.state_sum = st.pmin+st.pmax+st.p+st.checksum+st.primecount+st.factorcount+st.last_trickle+st.nmin+st.nmax;
+	st.state_sum = st.base+st.pmin+st.pmax+st.p+st.checksum+st.primecount+st.factorcount+st.last_trickle+st.nmin+st.nmax;
 
         if (sd.write_state_a_next){
 		if ((out = my_fopen(STATE_FILENAME_A,"wb")) == NULL)
@@ -126,7 +126,7 @@ void write_state( workStatus & st, searchData & sd ){
 	}
 }
 
-
+// TODO:  Add K list
 int read_state( workStatus & st, searchData & sd ){
 
 	FILE * in;
@@ -144,14 +144,13 @@ int read_state( workStatus & st, searchData & sd ){
 			printf("Cannot parse %s !!!\n",STATE_FILENAME_A);
 			good_state_a = false;
 		}
-		else if(stat_a.pmin != st.pmin || stat_a.pmax != st.pmax || stat_a.nmin != st.nmin || stat_a.nmax != st.nmax
-			|| stat_a.factorial != st.factorial || stat_a.primorial != st.primorial || stat_a.compositorial != st.compositorial){
+		else if(stat_a.base != st.base || stat_a.pmin != st.pmin || stat_a.pmax != st.pmax || stat_a.nmin != st.nmin || stat_a.nmax != st.nmax){
 			fprintf(stderr,"Invalid checkpoint file %s !!!\n",STATE_FILENAME_A);
 			printf("Invalid checkpoint file %s !!!\n",STATE_FILENAME_A);
 			good_state_a = false;
 		}
 		else{
-			uint64_t state_sum = stat_a.pmin+stat_a.pmax+stat_a.p+stat_a.checksum+stat_a.primecount+stat_a.factorcount
+			uint64_t state_sum = stat_a.base+stat_a.pmin+stat_a.pmax+stat_a.p+stat_a.checksum+stat_a.primecount+stat_a.factorcount
 						+stat_a.last_trickle+stat_a.nmin+stat_a.nmax;
 			if(state_sum != stat_a.state_sum){
 				fprintf(stderr,"Checksum error in %s !!!\n",STATE_FILENAME_A);
@@ -172,14 +171,13 @@ int read_state( workStatus & st, searchData & sd ){
 			printf("Cannot parse %s !!!\n",STATE_FILENAME_B);
 			good_state_b = false;
 		}
-		else if(stat_b.pmin != st.pmin || stat_b.pmax != st.pmax || stat_b.nmin != st.nmin || stat_b.nmax != st.nmax
-			|| stat_b.factorial != st.factorial || stat_b.primorial != st.primorial || stat_b.compositorial != st.compositorial){
+		else if(stat_b.base != st.base || stat_b.pmin != st.pmin || stat_b.pmax != st.pmax || stat_b.nmin != st.nmin || stat_b.nmax != st.nmax){
 			fprintf(stderr,"Invalid checkpoint file %s !!!\n",STATE_FILENAME_B);
 			printf("Invalid checkpoint file %s !!!\n",STATE_FILENAME_B);
 			good_state_b = false;
 		}
 		else{
-			uint64_t state_sum = stat_b.pmin+stat_b.pmax+stat_b.p+stat_b.checksum+stat_b.primecount+stat_b.factorcount
+			uint64_t state_sum = stat_b.base+stat_b.pmin+stat_b.pmax+stat_b.p+stat_b.checksum+stat_b.primecount+stat_b.factorcount
 						+stat_b.last_trickle+stat_b.nmin+stat_b.nmax;
 			if(state_sum != stat_b.state_sum){
 				fprintf(stderr,"Checksum error in %s !!!\n",STATE_FILENAME_B);
@@ -500,10 +498,10 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			uint32_t fn = h_factor[i].n;
 			uint32_t fk = (h_factor[i].k < 0) ? -h_factor[i].k : h_factor[i].k;
 			int32_t fc = (h_factor[i].k < 0) ? -1 : 1;
-			int32_t vres = verify_factor( fp, fk, fn, fc ); 
+			int32_t vres = verify_factor( fp, fk, fn, fc, st.base); 
 			if( !vres ){
-				fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u*2^%u%+d\n", fp, fk, fn, fc);
-				printf("CPU factor verification failed!  %" PRIu64 " is not a factor of %u*2^%u%+d\n", fp, fk, fn, fc);
+				fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
+				printf("CPU factor verification failed!  %" PRIu64 " is not a factor of %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
 				exit(EXIT_FAILURE);
 			}
 			else if( vres == -1 ){		// Unlikely
@@ -532,7 +530,7 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			int32_t fc = (h_factor[i].k < 0) ? -1 : 1;
 			if(fp){
 				++st.factorcount;
-				if( fprintf( resfile, "%" PRIu64 " | %u*2^%u%+d\n", fp, fk, fn, fc) < 0 ){
+				if( fprintf( resfile, "%" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc) < 0 ){
 					fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 					exit(EXIT_FAILURE);
 				}
@@ -803,12 +801,12 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	uint32_t QQ = Q<<1;
 	uint32_t mm = (uint32_t) ceil((double)L / QQ);
 
-	printf("-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DMR=%u\n",
-		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, mr);
+	printf("-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DMR=%u -DBASE=%u\n",
+		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, mr, st.base);
 
 	char cldef[256];
-	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DMR=%u",
-		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, mr);
+	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DMR=%u -DBASE=%u",
+		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, mr, st.base);
 
 	// setup each k as part of a __constant kernel array
 	char *const_str = generate_constant_array_string(h_klist, sd.kcount, "klist");
@@ -1150,15 +1148,13 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
 
 void reset_data(workStatus & st, searchData & sd){
+	st.base = 0;
 	st.checksum = 0;
 	st.primecount = 0;
 	st.factorcount = 0;
 	sd.scount = 0;
 	sd.powcount = 0;
 	sd.prodcount = 0;
-	st.factorial = false;
-	st.primorial = false;
-	st.compositorial = false;
 }
 
 
@@ -1168,322 +1164,6 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd ){
 	printf("self test not implemented yet!\n");
 	exit(EXIT_FAILURE);
 
-
-	int goodtest = 0;
-
-	printf("Beginning self test of 16 ranges.\n");
-
-	time_t start, finish;
-	time(&start);
-
-	printf("Starting Factorial tests\n\n");
-//	-p 100e6 -P 101e6 -n 1e6 -N 2e6 -!
-	reset_data(st, sd);
-	st.factorial = true;
-	st.pmin = 100000000;
-	st.pmax = 101000000;
-	st.nmin = 1000000;
-	st.nmax = 2000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 1071 && st.primecount == 54211 && st.checksum == 0x000004F844B5103C ){
-		printf("test case 1 passed.\n\n");
-		fprintf(stderr,"test case 1 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 1 failed.\n\n");
-		fprintf(stderr,"test case 1 failed.\n");
-	}
-
-//	-p 1e12 -P 100001e7 -n 10000 -N 2e6 -!
-	reset_data(st, sd);
-	st.factorial = true;
-	st.pmin = 1000000000000;
-	st.pmax = 1000010000000;
-	st.nmin = 10000;
-	st.nmax = 2000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 3 && st.primecount == 361727 && st.checksum == 0x0505A1C238896511 ){
-		printf("test case 2 passed.\n\n");
-		fprintf(stderr,"test case 2 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 2 failed.\n\n");
-		fprintf(stderr,"test case 2 failed.\n");
-	}
-
-//	-p 101 -P 100000 -n 101 -N 1e6 -!
-	reset_data(st, sd);
-	st.factorial = true;
-	st.pmin = 101;
-	st.pmax = 100000;
-	st.nmin = 101;
-	st.nmax = 1000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 42821 && st.primecount == 9571 && st.checksum == 0x0000000065DDB8A0 ){
-		printf("test case 3 passed.\n\n");
-		fprintf(stderr,"test case 3 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 3 failed.\n\n");
-		fprintf(stderr,"test case 3 failed.\n");
-	}
-
-//	-p 1e12 -P 1000001e6 -n 10e7 -N 11e7 -!
-	reset_data(st, sd);
-	st.factorial = true;
-	st.pmin = 1000000000000;
-	st.pmax = 1000001000000;
-	st.nmin = 100000000;
-	st.nmax = 110000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 3 && st.primecount == 36249 && st.checksum == 0x00804FE7D7AA6C09 ){
-		printf("test case 4 passed.\n\n");
-		fprintf(stderr,"test case 4 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 4 failed.\n\n");
-		fprintf(stderr,"test case 4 failed.\n");
-	}
-
-	printf("Starting Primorial tests\n\n");
-//	-p 100e6 -P 101e6 -n 101 -N 25e6 -#
-	reset_data(st, sd);
-	st.primorial = true;
-	st.pmin = 100000000;
-	st.pmax = 101000000;
-	st.nmin = 101;
-	st.nmax = 25000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 1703 && st.primecount == 54211 && st.checksum == 0x0000027EFF497990 ){
-		printf("test case 5 passed.\n\n");
-		fprintf(stderr,"test case 5 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 5 failed.\n\n");
-		fprintf(stderr,"test case 5 failed.\n");
-	}
-
-//	-p 101 -P 2e6 -n 101 -N 2e6 -#
-	reset_data(st, sd);
-	st.primorial = true;
-	st.pmin = 101;
-	st.pmax = 2000000;
-	st.nmin = 101;
-	st.nmax = 2000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 24503 && st.primecount == 148954 && st.checksum == 0x000000027BF5B8E0 ){
-		printf("test case 6 passed.\n\n");
-		fprintf(stderr,"test case 6 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 6 failed.\n\n");
-		fprintf(stderr,"test case 6 failed.\n");
-	}
-
-//	-p 1e11 -P 100005e6 -n 9e6 -N 11e7 -#
-	reset_data(st, sd);
-	st.primorial = true;
-	st.pmin = 100000000000;
-	st.pmax = 100005000000;
-	st.nmin = 9000000;
-	st.nmax = 110000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 32 && st.primecount == 197222 && st.checksum == 0x0022FE7C09210B4B ){
-		printf("test case 7 passed.\n\n");
-		fprintf(stderr,"test case 7 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 7 failed.\n\n");
-		fprintf(stderr,"test case 7 failed.\n");
-	}
-
-//	-n 600000 -N 30e6 -p 1730720716e6 -P 1730720720e6 -#
-	reset_data(st, sd);
-	st.primorial = true;
-	st.pmin = 1730720716000000;
-	st.pmax = 1730720720000000;
-	st.nmin = 600000;
-	st.nmax = 30000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 1 && st.primecount == 114208 && st.checksum == 0x5CDCB47F7E9532C2 ){
-		printf("test case 8 passed.\n\n");
-		fprintf(stderr,"test case 8 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 8 failed.\n\n");
-		fprintf(stderr,"test case 8 failed.\n");
-	}
-
-	printf("Starting Compositorial tests\n\n");
-//	-p 200e6 -P 20001e4 -n 101 -N 26e6 -c
-	reset_data(st, sd);
-	st.compositorial = true;
-	st.pmin = 200000000;
-	st.pmax = 200010000;
-	st.nmin = 101;
-	st.nmax = 26000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 127 && st.primecount == 529 && st.checksum == 0x0000001848D8AFBB ){
-		printf("test case 9 passed.\n\n");
-		fprintf(stderr,"test case 9 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 9 failed.\n\n");
-		fprintf(stderr,"test case 9 failed.\n");
-	}
-
-//	-p 101 -P 1e5 -n 101 -N 1e6 -c
-	reset_data(st, sd);
-	st.compositorial = true;
-	st.pmin = 101;
-	st.pmax = 100000;
-	st.nmin = 101;
-	st.nmax = 1000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 34271 && st.primecount == 9571 && st.checksum == 0x000000006FF88EAE ){
-		printf("test case 10 passed.\n\n");
-		fprintf(stderr,"test case 10 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 10 failed.\n\n");
-		fprintf(stderr,"test case 10 failed.\n");
-	}
-
-//	-p 2e11 -P 200005e6 -n 15e6 -N 2e7 -c
-	reset_data(st, sd);
-	st.compositorial = true;
-	st.pmin = 200000000000;
-	st.pmax = 200005000000;
-	st.nmin = 15000000;
-	st.nmax = 20000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 13 && st.primecount == 192386 && st.checksum == 0x0088B59C23CD3E2B ){
-		printf("test case 11 passed.\n\n");
-		fprintf(stderr,"test case 11 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 11 failed.\n\n");
-		fprintf(stderr,"test case 11 failed.\n");
-	}
-
-//	-n 700000 -N 25e6 -p 1e12 -P 1000001e6 -c
-	reset_data(st, sd);
-	st.compositorial = true;
-	st.pmin = 1000000000000;
-	st.pmax = 1000001000000;
-	st.nmin = 700000;
-	st.nmax = 25000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 2 && st.primecount == 36249 && st.checksum == 0x0080997AF3BF42FE ){
-		printf("test case 12 passed.\n\n");
-		fprintf(stderr,"test case 12 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 12 failed.\n\n");
-		fprintf(stderr,"test case 12 failed.\n");
-	}
-
-	printf("Starting Combined Factorial+Compositorial tests\n\n");
-//	-p 1e11 -P 10001e7 -n 96000 -N 2e6 -! -c
-	reset_data(st, sd);
-	st.factorial = true;
-	st.compositorial = true;
-	st.pmin = 100000000000;
-	st.pmax = 100010000000;
-	st.nmin = 96000;
-	st.nmax = 2000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 27 && st.primecount == 394403 && st.checksum == 0x00D214CC0EF0ECB4 ){
-		printf("test case 13 passed.\n\n");
-		fprintf(stderr,"test case 13 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 13 failed.\n\n");
-		fprintf(stderr,"test case 13 failed.\n");
-	}
-
-//	-p 101 -P 11e4 -n 101 -N 1e6 -c -!
-	reset_data(st, sd);
-	st.factorial = true;
-	st.compositorial = true;
-	st.pmin = 101;
-	st.pmax = 110000;
-	st.nmin = 101;
-	st.nmax = 1000000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 84077 && st.primecount == 10433 && st.checksum == 0x00000000EFB634E9 ){
-		printf("test case 14 passed.\n\n");
-		fprintf(stderr,"test case 14 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 14 failed.\n\n");
-		fprintf(stderr,"test case 14 failed.\n");
-	}
-
-//	-p 101e8 -P 10101e6 -n 115e5 -N 125e5 -! -c
-	reset_data(st, sd);
-	st.factorial = true;
-	st.compositorial = true;
-	st.pmin = 10100000000;
-	st.pmax = 10101000000;
-	st.nmin = 11500000;
-	st.nmax = 12500000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 19 && st.primecount == 43374 && st.checksum == 0x0002578EA9FD63C7 ){
-		printf("test case 15 passed.\n\n");
-		fprintf(stderr,"test case 15 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 15 failed.\n\n");
-		fprintf(stderr,"test case 15 failed.\n");
-	}
-
-//	-p 2e12 -P 200002e7 -n 670000 -N 2460000 -! -c
-	reset_data(st, sd);
-	st.factorial = true;
-	st.compositorial = true;
-	st.pmin = 2000000000000;
-	st.pmax = 2000020000000;
-	st.nmin = 670000;
-	st.nmax = 2460000;
-	cl_sieve( hardware, st, sd );
-	if( st.factorcount == 3 && st.primecount == 706162 && st.checksum == 0x1D63BBC574E8D50F ){
-		printf("test case 16 passed.\n\n");
-		fprintf(stderr,"test case 16 passed.\n");
-		++goodtest;
-	}
-	else{
-		printf("test case 16 failed.\n\n");
-		fprintf(stderr,"test case 16 failed.\n");
-	}
-
-//	done
-	if(goodtest == 16){
-		printf("All test cases completed successfully!\n");
-		fprintf(stderr, "All test cases completed successfully!\n");
-	}
-	else{
-		printf("Self test FAILED!\n");
-		fprintf(stderr, "Self test FAILED!\n");
-	}
-
-	time(&finish);
-	printf("Elapsed time: %d sec.\n", (int)finish - (int)start);
 
 }
 

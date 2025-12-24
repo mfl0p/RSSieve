@@ -2,4 +2,4 @@
 
 #include <cinttypes>
 
-int verify_factor( uint64_t p, uint64_t k, uint32_t n, int32_t c );
+int verify_factor( uint64_t p, uint64_t k, uint32_t n, int32_t c, uint32_t base );

@@ -28,6 +28,7 @@ void help()
 	printf("Welcome to RSSieve, an OpenCL Riesel Sierpinski Sieve for multiple sequences k*b^n+-1 using the BSGS algorithm.\n");
 	printf("A list of up to 200 k, one per line, are specified in seq.txt where negative k is for Riesel and positive k is for Sierpinski.\n");
 	printf("Program usage:\n");
+	printf("-b #	base\n");
 	printf("-n #	Start n\n");
 	printf("-N #	End N\n");
 	printf("		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive\n");
@@ -40,7 +41,7 @@ void help()
 }
 
 
-static const char *short_opts = "p:P:n:N:sh?";
+static const char *short_opts = "b:p:P:n:N:sh?";
 
 static int parse_option(int opt, char *arg, const char *source, workStatus & st, searchData & sd)
 {
@@ -48,6 +49,10 @@ static int parse_option(int opt, char *arg, const char *source, workStatus & st,
 
   switch (opt)
   {
+    case 'b':
+      status = parse_uint(&st.base,arg,2,0x7FFFFFFF);
+      break;
+
     case 'p':
       status = parse_uint64(&st.pmin,arg,3,0xFFFFFFFFFFFFFFFF-1);
       break;
@@ -193,8 +198,8 @@ int main(int argc, char *argv[])
         options.normal_thread_priority = true;
         boinc_init_options(&options);
 
-	fprintf(stderr, "\nNOTE THIS IS AN INCOMPLETE VERSION THAT ONLY SUPPORTS BASE 2!\n");
-	printf("\nNOTE THIS IS AN INCOMPLETE VERSION THAT ONLY SUPPORTS BASE 2!\n");
+	fprintf(stderr, "\nNOTE THIS IS AN INCOMPLETE VERSION!\n");
+	printf("\nNOTE THIS IS AN INCOMPLETE VERSION!\n");
 
 	fprintf(stderr, "\nRSSieve v%s.%s by Bryan Little\nwith contributions by Geoffrey Reynolds and Yves Gallot\n",VERSION_MAJOR,VERSION_MINOR);
 	fprintf(stderr, "Compiled " __DATE__ " with GCC " __VERSION__ "\n");

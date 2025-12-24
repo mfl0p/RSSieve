@@ -8,7 +8,7 @@ With contributions by
 * Geoffrey Reynolds
 * Yves Gallot
 
-	THIS IS AN INCOMPLETE VERSION THAT ONLY SUPPORTS BASE 2
+	THIS IS AN INCOMPLETE VERSION!
 
 ## Requirements
 
@@ -28,6 +28,7 @@ With contributions by
 ```
 A list of up to 200 k, one per line, are specified in seq.txt where negative k is for Riesel and positive k is for Sierpinski.
 command line options
+* -b #  base
 * -n #	Start n
 * -N #	End N
 * 		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive

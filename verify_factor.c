@@ -128,10 +128,7 @@ bool isPrime(uint64_t p, uint64_t q, uint64_t one, uint64_t pmo, uint64_t two, u
 }
 
 
-int verify_factor(	uint64_t p,
-			uint64_t k,
-			uint32_t n,
-			int32_t c	){
+int verify_factor(uint64_t p, uint64_t k, uint32_t n, int32_t c, uint32_t base){
 
 
 	uint64_t q = invert(p);
@@ -143,6 +140,8 @@ int verify_factor(	uint64_t p,
 		t = m_mul(t, t, p, q);	// 4^{2^5} = 2^64
 	uint64_t r2 = t;
 
+	uint64_t mbase = (base==2) ? two : m_mul(base,r2,p,q);
+
 	if(!isPrime(p, q, one, pmo, two, r2)){
 		return -1;
 	}
@@ -151,31 +150,32 @@ int verify_factor(	uint64_t p,
 	uint32_t curBit = 0x80000000;
 	curBit >>= ( __builtin_clz(exp) + 1 );
 
-	uint64_t a = two;  // 2 in montgomery form
+	uint64_t a = mbase;
 
-	uint64_t Km = m_mul(k,r2,p,q);  // convert k to montgomery form
-
-	// a = 2^n mod P
+	// a = base^n mod P
 	while( curBit )
 	{
 		a = m_mul(a,a,p,q);
 
 		if(exp & curBit){
-			a = add(a,a,p);
+			a = (base==2) ? add(a,a,p) : m_mul(a,mbase,p,q);
 		}
 
 		curBit >>= 1;
 	}
 
-	// b = k*2^n mod P
+	// convert k to montgomery form
+	uint64_t Km = m_mul(k,r2,p,q);
+ 
+	// b = k*base^n mod P
 	uint64_t b = m_mul(a,Km,p,q);
 
 	if(b == one && c == -1){
-//		printf("%" PRIu64 " is a factor of %" PRIu64 "*2^%u-1\n",p,k,n);
+//		printf("%" PRIu64 " is a factor of %" PRIu64 "*%u^%u-1\n",p,k,base,n);
 		return 1;
 	}
 	else if(b == pmo && c == 1){
-//		printf("%" PRIu64 " is a factor of %" PRIu64 "*2^%u+1\n",p,k,n);
+//		printf("%" PRIu64 " is a factor of %" PRIu64 "*%u^%u+1\n",p,k,base,n);
 		return 1;
 	}
 

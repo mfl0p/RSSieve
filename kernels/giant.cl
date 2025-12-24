@@ -74,27 +74,6 @@ ulong m_mul(ulong a, ulong b, ulong p, ulong q){
 	return ( ab.s1 < mp ) ? r + p : r;
 }
 
-ulong add(ulong a, ulong b, ulong p){
-	ulong r;
-	ulong c = (a >= p - b) ? p : 0;
-	r = a + b - c;
-	return r;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 64 bit exponent
-ulong powmodlg(ulong mbase, ulong exp, ulong p, ulong q) {
-	ulong curBit = 0x8000000000000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-			a = m_mul(a,mbase,p,q);
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
 
 // left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
 ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
@@ -107,21 +86,6 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 		a = m_mul(a,a,p,q);
 		if(exp & curBit){
 			a = m_mul(a,mbase,p,q);
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// left to right powmod 2^exp mod P, with 32 bit exponent
-ulong pow2modsm(uint exp, ulong p, ulong q, ulong two) {
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = two;
-	while( curBit ){
-		a = m_mul(a, a, p, q);
-		if(exp & curBit){
-			a = add(a, a, p);		// base 2 we can add
 		}
 		curBit >>= 1;
 	}

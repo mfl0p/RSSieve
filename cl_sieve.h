@@ -14,8 +14,7 @@ typedef struct {
 
 typedef struct {
 	uint64_t pmin, pmax, p, checksum, primecount, factorcount, last_trickle, state_sum;
-	uint32_t nmin, nmax;
-	bool factorial, primorial, compositorial;
+	uint32_t nmin, nmax, base;
 }workStatus;
 
 typedef struct {

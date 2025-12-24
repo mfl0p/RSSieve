@@ -108,7 +108,7 @@ ulong pow2modlg(ulong two, ulong exp, ulong p, ulong q) {
 	while( curBit ){
 		a = m_mul(a, a, p, q);
 		if(exp & curBit){
-			a = add(a, a, p);		// base 2 we can add
+			a = add(a, a, p);	// base 2 we can add
 		}
 		curBit >>= 1;
 	}
@@ -116,61 +116,40 @@ ulong pow2modlg(ulong two, ulong exp, ulong p, ulong q) {
 }
 
 // left to right powmod 2^exp mod P, with 32 bit exponent
-ulong pow2modsm(uint exp, ulong p, ulong q, ulong two) {
+ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
 	ulong a = two;
 	while( curBit ){
 		a = m_mul(a, a, p, q);
 		if(exp & curBit){
-			a = add(a, a, p);		// base 2 we can add
+			a = add(a, a, p);	// base 2 we can add
 		}
 		curBit >>= 1;
 	}
 	return a;
 }
 
-// Compute Legendre symbol (a|p)
-int legendre(ulong a, ulong p, ulong q, ulong one, ulong two, ulong pmo, ulong power) {
-	ulong ls;
-	if(a == two){
-		ls = pow2modlg(two, power, p, q);
-	}
-	else{
-		ls = powmodlg(a, power, p, q);
-	}
-	if (ls == one) return 1;
-	else if (ls == pmo) return -1;
-	return 0; // shouldn't happen
-}
-
-int cq_residue(ulong a, ulong p, ulong q, ulong one, ulong two, ulong power) {
-	ulong r;
-	if(a == two){
-		r = pow2modlg(two, power, p, q);
-	}
-	else{
-		r = powmodlg(a, power, p, q);
-	}
-	return (r == one);
-}
-
-void do_powmods( ulong power, ulong *previous, ulong *ra, ulong *rg, ulong hk_inv, ulong p, ulong q, ulong two ){
+void do_powmods( ulong power, ulong *previous, ulong *ra, ulong *rg, ulong hk_inv, ulong p, ulong q, ulong base ){
 	ulong exp = power - *previous;
 	ulong ra2 = powmodlg(hk_inv, exp, p, q);
-	ulong rg2 = pow2modlg(two, exp, p, q);
+#if BASE == 2
+	ulong rg2 = pow2modlg(base, exp, p, q);
+#else
+	ulong rg2 = powmodlg(base, exp, p, q);
+#endif
 	*ra = m_mul(*ra, ra2, p, q);
 	*rg = m_mul(*rg, rg2, p, q);
 	*previous = power;
 } 
 
 // prefilter check for solvability
-int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong two, ulong pmo, ulong pm) {
+int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong base, ulong pmo, ulong pm) {
 
 	ulong previous = 0;
 	ulong ra=one, rg=one;
 
-	// div get converted to mul by inverse during compile
+	// div should get converted to mul by inverse during compile
 	ulong expo[8], quot;
 	// expo[0] = (pm%13) ? 0 : pm/13;   ...
 	quot = pm/13;
@@ -194,22 +173,23 @@ int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong two, ulong pmo, u
 	// powmod continues from previous powmod
 	for(int i=0; i<8; ++i){
 		if( expo[i] ){
-			do_powmods( expo[i], &previous, &ra, &rg, hk_inv, p, q, two );    
+			do_powmods( expo[i], &previous, &ra, &rg, hk_inv, p, q, base );    
 			if( rg==one && ra!=one ) return 0;	// impossible: base yields only tridecic...cubic but a is not one
 		}
 	}
 
 	// quadratic
-	do_powmods( pm>>1, &previous, &ra, &rg, hk_inv, p, q, two );    
+	do_powmods( pm>>1, &previous, &ra, &rg, hk_inv, p, q, base );    
 
-	int ls_a = (ra == one) - (ra == pmo);
-	int ls_g = (rg == one) - (rg == pmo);
 /*
 	if(ra == one) ls_a = 1;
 	else if(ra == pmo) ls_a = -1;
 	if(rg == one) ls_g = 1;
 	else if(rg == pmo) ls_g = -1;
 */
+	int ls_a = (ra == one) - (ra == pmo);
+	int ls_g = (rg == one) - (rg == pmo);
+
 	// Quadratic logic ...
 	if (ls_g == -1) {
 		if (ls_a == 1){
@@ -252,8 +232,8 @@ __kernel void setup(	__global ulong4 * g_prime,
 		}
 	}
 
-	// .s0=p, .s1=q, .s2=one, .s3=two
-	const ulong4 prime = g_prime[gid];
+	// .s0=p, .s1=q, .s2=one, .s3=two or montgomerized base
+	ulong4 prime = g_prime[gid];
 	const ulong pmo = prime.s0 - prime.s2;	// montgomerized p-1
 	const ulong pm = prime.s0 - 1;
 	const uint hashoffset = gid*HSIZE;
@@ -269,7 +249,12 @@ __kernel void setup(	__global ulong4 * g_prime,
 
 	int count[4] = {0, 0, 0, 0};
 
-	ulong gQ = pow2modsm(Q, prime.s0, prime.s1, prime.s3);
+#if BASE == 2
+	ulong gQ = pow2modsm(prime.s3, Q, prime.s0, prime.s1);
+#else
+	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1);
+	ulong gQ = powmodsm(prime.s3, Q, prime.s0, prime.s1);
+#endif
 
 	// for batch inversion
 	ulong mk[KCOUNT+1];
@@ -320,6 +305,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 		return;
 	}
 
+	// counters for testing
 	if(count[0]){		// skipped
 		atomic_add(&g_primecount[5],count[0]);
 	}
@@ -333,12 +319,13 @@ __kernel void setup(	__global ulong4 * g_prime,
 		atomic_add(&g_primecount[8],count[3]);
 	}
 
-	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
-	g_prime[gid].s3 = gQ_inv;
-
 	// build baby steps, offset by even NMIN
-	// 2^NMIN mod P
-	ulong gj = pow2modsm(NMIN, prime.s0, prime.s1, prime.s3);
+	// BASE^NMIN mod P
+#if BASE == 2
+	ulong gj = pow2modsm(prime.s3, NMIN, prime.s0, prime.s1);
+#else
+	ulong gj = powmodsm(prime.s3, NMIN, prime.s0, prime.s1);
+#endif
 
 	for(int j = 0; j < QQ; j++) {
 		if(j>=Q && !count[2] && !count[3]) break;
@@ -359,9 +346,16 @@ __kernel void setup(	__global ulong4 * g_prime,
 			}
 		}
 
-		// gj * 2 mod P
+		// gj * BASE mod P
+#if BASE == 2
 		gj = add(gj, gj, prime.s0);
+#else
+		gj = m_mul(gj, prime.s3, prime.s0, prime.s1);
+#endif
 	}
+
+	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
+	g_prime[gid].s3 = gQ_inv;
 
 }
 
