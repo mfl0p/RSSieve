@@ -28,7 +28,7 @@ void help()
 	printf("Welcome to RSSieve, an OpenCL Riesel Sierpinski Sieve for multiple sequences k*b^n+-1 using the BSGS algorithm.\n");
 	printf("A list of up to 200 k, one per line, are specified in seq.txt where negative k is for Riesel and positive k is for Sierpinski.\n");
 	printf("Program usage:\n");
-	printf("-b #	base\n");
+	printf("-b #	base, 2 <= b < 2^31\n");
 	printf("-n #	Start n\n");
 	printf("-N #	End N\n");
 	printf("		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive\n");

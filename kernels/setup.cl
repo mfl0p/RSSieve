@@ -232,7 +232,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 		}
 	}
 
-	// .s0=p, .s1=q, .s2=one, .s3=two or montgomerized base
+	// .s0=p, .s1=q, .s2=one, .s3=two
 	ulong4 prime = g_prime[gid];
 	const ulong pmo = prime.s0 - prime.s2;	// montgomerized p-1
 	const ulong pm = prime.s0 - 1;
@@ -240,9 +240,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 	const uint adjoffset = gid*KCOUNT;
 
 	ulong four = add(prime.s3, prime.s3, prime.s0);
-#if BASE == 5
-	prime.s3 = add(four, prime.s2, prime.s0); // montgomerized 4+1
-#endif
+
 	// setup r2
 	ulong r2 = m_mul(four, four, prime.s0, prime.s1);
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);
@@ -250,9 +248,15 @@ __kernel void setup(	__global ulong4 * g_prime,
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);	// 4^{2^5} = 2^64
 
-#if BASE > 5
-	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1); // montgomerized base
+	// set .s3 to montgomery form of BASE. no setup is needed for base 2. 
+#if BASE == 3
+	prime.s3 = add(prime.s2, prime.s3, prime.s0); // base = montgomerized 1+2
+#elif BASE == 5
+	prime.s3 = add(four, prime.s2, prime.s0); // base = montgomerized 4+1
+#elif BASE > 5
+	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1); // base = montgomerized BASE
 #endif
+
 	// for batch inversion
 	ulong mk[KCOUNT+1];
 	ulong prefix[KCOUNT+1];
@@ -262,6 +266,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 #else
 	ulong gQ = powmodsm(prime.s3, Q, prime.s0, prime.s1);
 #endif
+
 	mk[KCOUNT] = gQ;	// use last index for gQ_inverse
 
 	// compute mk[i] = montgomerized k

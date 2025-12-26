@@ -544,17 +544,45 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 }
 
 
+bool is_perfect_power(uint64_t b, uint32_t *base) {
+	for(uint64_t a = 2; a * a <= b; ++a) {
+		uint64_t p = a * a;
+		while (p < b){
+			p *= a;
+		}
+		if (p == b){
+			*base = (uint32_t)a;
+			return true;
+		}
+	}
+	return false;
+}
+
+
 void setupSearch(workStatus & st, searchData & sd){
+
+	if(!st.base){
+		printf("\n-b argument is required\nuse -h for help\n");
+		fprintf(stderr, "-b argument is required\n");
+		exit(EXIT_FAILURE);
+	}
+
+	uint32_t basepow;
+	if( is_perfect_power(st.base, &basepow) ){
+		printf("\nerror: selected base %u is a perfect power of base %u!\n", st.base, basepow);
+		fprintf(stderr, "error: selected base %u is a perfect power of base %u!\n", st.base, basepow);
+		exit(EXIT_FAILURE);
+	}
 
 	st.p = st.pmin;
 
-	if(st.pmin == 0 || st.pmax == 0){
+	if(!st.pmin || !st.pmax){
 		printf("\n-p and -P arguments are required\nuse -h for help\n");
 		fprintf(stderr, "-p and -P arguments are required\n");
 		exit(EXIT_FAILURE);
 	}
 
-	if(st.nmin == 0 || st.nmax == 0){
+	if(!st.nmin || !st.nmax){
 		printf("\n-n and -N arguments are required\nuse -h for help\n");
 		fprintf(stderr, "-n and -N arguments are required\n");
 		exit(EXIT_FAILURE);
@@ -581,7 +609,6 @@ void setupSearch(workStatus & st, searchData & sd){
 	// increase result buffer at low P range
 	// it's still possible to overflow this with a fast GPU and large search range
 	if(st.pmin < 0xFFFFFFFF){
-		sd.numresults = 30000000;
 		sd.numresults = 300000000;
 	}
 
