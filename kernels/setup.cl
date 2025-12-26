@@ -239,27 +239,29 @@ __kernel void setup(	__global ulong4 * g_prime,
 	const uint hashoffset = gid*HSIZE;
 	const uint adjoffset = gid*KCOUNT;
 
+	ulong four = add(prime.s3, prime.s3, prime.s0);
+#if BASE == 5
+	prime.s3 = add(four, prime.s2, prime.s0); // montgomerized 4+1
+#endif
 	// setup r2
-	ulong r2 = add(prime.s3, prime.s3, prime.s0);
-	r2 = m_mul(r2, r2, prime.s0, prime.s1);
+	ulong r2 = m_mul(four, four, prime.s0, prime.s1);
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);
 	r2 = m_mul(r2, r2, prime.s0, prime.s1);	// 4^{2^5} = 2^64
 
-	int count[4] = {0, 0, 0, 0};
-
-#if BASE == 2
-	ulong gQ = pow2modsm(prime.s3, Q, prime.s0, prime.s1);
-#else
-	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1);
-	ulong gQ = powmodsm(prime.s3, Q, prime.s0, prime.s1);
+#if BASE > 5
+	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1); // montgomerized base
 #endif
-
 	// for batch inversion
 	ulong mk[KCOUNT+1];
 	ulong prefix[KCOUNT+1];
 
+#if BASE == 2
+	ulong gQ = pow2modsm(prime.s3, Q, prime.s0, prime.s1);
+#else
+	ulong gQ = powmodsm(prime.s3, Q, prime.s0, prime.s1);
+#endif
 	mk[KCOUNT] = gQ;	// use last index for gQ_inverse
 
 	// compute mk[i] = montgomerized k
@@ -279,6 +281,9 @@ __kernel void setup(	__global ulong4 * g_prime,
 	ulong prev = prefix[KCOUNT-1];
 	ulong gQ_inv = m_mul(inv_total, prev, prime.s0, prime.s1);
 	inv_total = m_mul(inv_total, mk[KCOUNT], prime.s0, prime.s1);
+
+	// parity type counters
+	int count[4] = {0, 0, 0, 0};
 
 	// walk backward to get each k_inv
 	for (int i = KCOUNT - 1; i >= 0; --i) {
