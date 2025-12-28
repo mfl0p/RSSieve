@@ -457,12 +457,28 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 		printf("error: getsegprimes kernel local memory overflow\n");
 		exit(EXIT_FAILURE);
 	}
-	printf("skipped %u primes\n",h_primecount[3]);
-	printf("skipped %u k\n",h_primecount[5]);
+
+	double totalk = ((double)h_sum[0] - (double)h_primecount[3]) * (double)sd.kcount;
+	double skipped = (double)h_primecount[5] / totalk * 100.0;
+	double full = (double)h_primecount[11] / totalk * 100.0;
+	double even = (double)h_primecount[7] / totalk * 100.0;
+	double odd = (double)h_primecount[8] / totalk * 100.0;
+
+	double pskip = (double)h_primecount[3] / (double)h_sum[0] * 100.0;
+
+	printf("%.1f%% primes skipped\n",pskip);
+	printf("%.1f%% k skipped\n",skipped);
+	printf("%.1f%% k full range n\n",full);
+	printf("%.1f%% k restricted to even n\n",even);
+	printf("%.1f%% k restricted to odd n\n",odd);
+/*
+	printf("%u primes skipped\n",h_primecount[3]);
+	printf("%u k total\n",h_sum[0]*sd.kcount);
+	printf("%u k skipped\n",h_primecount[5]);
 	printf("%u k full range n\n",h_primecount[11]);
 	printf("%u k restricted to even n\n",h_primecount[7]);
 	printf("%u k restricted to odd n\n",h_primecount[8]);
-
+*/
 	uint32_t numfactors = h_primecount[2];
 	if(numfactors > 0){
 		if(boinc_is_standalone()){

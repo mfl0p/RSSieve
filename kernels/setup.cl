@@ -138,8 +138,8 @@ void do_powmods( ulong power, ulong *previous, ulong *ra, ulong *rg, ulong hk_in
 #else
 	ulong rg2 = powmodlg(base, exp, p, q);
 #endif
-	*ra = m_mul(*ra, ra2, p, q);
-	*rg = m_mul(*rg, rg2, p, q);
+	*ra = *previous ? m_mul(*ra, ra2, p, q) : ra2;
+	*rg = *previous ? m_mul(*rg, rg2, p, q) : rg2;
 	*previous = power;
 } 
 
@@ -147,9 +147,9 @@ void do_powmods( ulong power, ulong *previous, ulong *ra, ulong *rg, ulong hk_in
 int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong base, ulong pmo, ulong pm) {
 
 	ulong previous = 0;
-	ulong ra=one, rg=one;
+	ulong ra, rg;
 
-	// div should get converted to mul by inverse during compile
+	// div should get converted to mul by inverse during compile?
 	ulong expo[8], quot;
 	// expo[0] = (pm%13) ? 0 : pm/13;   ...
 	quot = pm/13;
@@ -283,6 +283,16 @@ __kernel void setup(	__global ulong4 * g_prime,
 
 	// invert total product once: inv_total = prefix[KCOUNT-1]^(p-2)
 	ulong inv_total = powmodlg(prefix[KCOUNT], prime.s0-2, prime.s0, prime.s1);
+
+	// test if inverse exists
+	ulong one = m_mul(prefix[KCOUNT], inv_total, prime.s0, prime.s1);
+	if(one != prime.s2){
+		// inverse doesn't exist, we can skip this 2-prp
+		atomic_inc(&g_primecount[3]);
+		g_prime[gid].s0 = 0;
+		return;
+	}
+
 	ulong prev = prefix[KCOUNT-1];
 	ulong gQ_inv = m_mul(inv_total, prev, prime.s0, prime.s1);
 	inv_total = m_mul(inv_total, mk[KCOUNT], prime.s0, prime.s1);
