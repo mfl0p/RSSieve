@@ -130,50 +130,56 @@ ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
 	return a;
 }
 
+
+void dualpowmodlg(const ulong basea, const ulong baseb, const ulong exp, const ulong p, const ulong q, ulong *reta, ulong *retb) {
+	ulong curBit = 0x8000000000000000;
+	curBit >>= ( clz(exp) + 1 );
+	ulong a = basea;
+	ulong b = baseb;
+	while( curBit )	{
+		a = m_mul(a,a,p,q);
+		b = m_mul(b,b,p,q);
+		if(exp & curBit){
+#if BASE == 2
+			a = add(a, a, p);	// base 2 we can add
+#else
+			a = m_mul(a,basea,p,q);
+#endif
+			b = m_mul(b,baseb,p,q);
+		}
+		curBit >>= 1;
+	}
+	*reta = a;
+	*retb = b;
+	return;
+}
+
+
 void do_powmods( ulong power, ulong *previous, ulong *ra, ulong *rg, ulong hk_inv, ulong p, ulong q, ulong base ){
 	ulong exp = power - *previous;
-	ulong ra2 = powmodlg(hk_inv, exp, p, q);
-#if BASE == 2
-	ulong rg2 = pow2modlg(base, exp, p, q);
-#else
-	ulong rg2 = powmodlg(base, exp, p, q);
-#endif
+	ulong ra2, rg2;
+
+	dualpowmodlg(base, hk_inv, exp, p, q, &rg2, &ra2);
+
 	*ra = *previous ? m_mul(*ra, ra2, p, q) : ra2;
 	*rg = *previous ? m_mul(*rg, rg2, p, q) : rg2;
 	*previous = power;
-} 
+}
 
+
+__constant int pres[20] = { 61, 59, 53, 47, 43, 41, 37, 31, 29, 23, 19, 17, 13, 11, 9, 8, 7, 5, 4, 3 };
 // prefilter check for solvability
 int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong base, ulong pmo, ulong pm) {
 
-	ulong previous = 0;
-	ulong ra, rg;
-
-	// div should get converted to mul by inverse during compile?
-	ulong expo[8], quot;
-	// expo[0] = (pm%13) ? 0 : pm/13;   ...
-	quot = pm/13;
-	expo[0] = ( pm != (quot*13) ) ? 0 : quot;
-	quot = pm/11;
-	expo[1] = ( pm != (quot*11) ) ? 0 : quot;
-	quot = pm/9;
-	expo[2] = ( pm != (quot*9) ) ? 0 : quot;
-	quot = pm>>3;
-	expo[3] = ( pm != (quot<<3) ) ? 0 : quot;
-	quot = pm/7;
-	expo[4] = ( pm != (quot*7) ) ? 0 : quot;
-	quot = pm/5;
-	expo[5] = ( pm != (quot*5) ) ? 0 : quot;
-	quot = pm>>2;
-	expo[6] = ( pm != (quot<<2) ) ? 0 : quot;
-	quot = pm/3;
-	expo[7] = ( pm != (quot*3) ) ? 0 : quot;
-
-	// power residue tests, decending tridecic to cubic
+	// power residue tests, decending
 	// powmod continues from previous powmod
-	for(int i=0; i<8; ++i){
-		if( expo[i] ){
-			do_powmods( expo[i], &previous, &ra, &rg, hk_inv, p, q, base );    
+	ulong quot, expo, ra, rg, previous=0;
+	for(int i=0; i<20; ++i){
+		int r = pres[i];
+		quot = pm/r;
+		expo = ( pm != (quot*r) ) ? 0 : quot;
+		if(expo){
+			do_powmods( expo, &previous, &ra, &rg, hk_inv, p, q, base );    
 			if( rg==one && ra!=one ) return 0;	// impossible: base yields only tridecic...cubic but a is not one
 		}
 	}

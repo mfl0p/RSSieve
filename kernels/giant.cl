@@ -109,16 +109,16 @@ __kernel void giantparity(	__global uint * g_primecount,
 	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
 	const ulong4 prime = g_prime[primepos];
 	if(!prime.s0) return;
-	int q = (gid%MR)*4;
+	int q = (gid%MR)*STEPS;
 	const uint hashoffset = primepos*HSIZE;
 	const uint adjoffset = primepos*KCOUNT;
 
-	ulong gm_step[4];
-	ulong gm_step_parity[4];
+	ulong gm_step[STEPS];
+	ulong gm_step_parity[STEPS];
 
 	gm_step[0] = powmodsm(prime.s3, q, prime.s0, prime.s1, prime.s2);
 	gm_step_parity[0] = m_mul(gm_step[0], gm_step[0], prime.s0, prime.s1);
-	for(int i=1; i<4; i++){
+	for(int i=1; i<STEPS; i++){
 		gm_step[i] = m_mul(gm_step[i-1], prime.s3, prime.s0, prime.s1);
 		gm_step_parity[i] = m_mul(gm_step[i], gm_step[i], prime.s0, prime.s1);
 	}
@@ -134,7 +134,7 @@ __kernel void giantparity(	__global uint * g_primecount,
 		}
 
 		__global const hash_entry *htable = (parity==1) ? g_htable : ( (parity==2) ? g_htable_e : g_htable_o );
-		for(int i=0; i<4; i++){
+		for(int i=0; i<STEPS; i++){
 			gamma = (parity==1) ? gm_step[i] : gm_step_parity[i];
 			gamma = m_mul(h_adj, gamma, prime.s0, prime.s1);
 			if(hash_lookup(htable, gamma, &r, hashoffset)) {
