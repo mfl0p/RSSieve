@@ -131,88 +131,37 @@ ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
 }
 
 
-void dualpowmodlg(const ulong basea, const ulong baseb, const ulong exp, const ulong p, const ulong q, ulong *reta, ulong *retb) {
-	ulong curBit = 0x8000000000000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = basea;
-	ulong b = baseb;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		b = m_mul(b,b,p,q);
-		if(exp & curBit){
-#if BASE == 2
-			a = add(a, a, p);	// base 2 we can add
-#else
-			a = m_mul(a,basea,p,q);
-#endif
-			b = m_mul(b,baseb,p,q);
-		}
-		curBit >>= 1;
-	}
-	*reta = a;
-	*retb = b;
-	return;
-}
-
-
-void do_powmods( ulong power, ulong *previous, ulong *ra, ulong *rg, ulong hk_inv, ulong p, ulong q, ulong base ){
-	ulong exp = power - *previous;
-	ulong ra2, rg2;
-
-	dualpowmodlg(base, hk_inv, exp, p, q, &rg2, &ra2);
-
-	*ra = *previous ? m_mul(*ra, ra2, p, q) : ra2;
-	*rg = *previous ? m_mul(*rg, rg2, p, q) : rg2;
-	*previous = power;
-}
-
-
-__constant int pres[20] = { 61, 59, 53, 47, 43, 41, 37, 31, 29, 23, 19, 17, 13, 11, 9, 8, 7, 5, 4, 3 };
+__constant int pres[12] = { 29, 23, 19, 17, 13, 11, 9, 8, 7, 5, 4, 3 };
 // prefilter check for solvability
-int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong base, ulong pmo, ulong pm) {
+int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong pmo, ulong *power, int powcnt, int rg) {
 
 	// power residue tests, decending
 	// powmod continues from previous powmod
-	ulong quot, expo, ra, rg, previous=0;
-	for(int i=0; i<20; ++i){
-		int r = pres[i];
-		quot = pm/r;
-		expo = ( pm != (quot*r) ) ? 0 : quot;
-		if(expo){
-			do_powmods( expo, &previous, &ra, &rg, hk_inv, p, q, base );    
-			if( rg==one && ra!=one ) return 0;	// impossible: base yields only tridecic...cubic but a is not one
-		}
+	ulong exp, ra, ra2, previous=0;
+	for(int i=0; i<powcnt; ++i){
+		exp = power[i] - previous;
+		ra2 = powmodlg(hk_inv, exp, p, q);
+		ra = (previous) ? m_mul(ra, ra2, p, q) : ra2;
+		previous = power[i];
+		if( ra!=one ) return 0;		// impossible
 	}
 
 	// quadratic
-	do_powmods( pm>>1, &previous, &ra, &rg, hk_inv, p, q, base );    
+	exp = power[12] - previous;
+	ra2 = powmodlg(hk_inv, exp, p, q);
+	ra = (previous) ? m_mul(ra, ra2, p, q) : ra2;
 
-/*
-	if(ra == one) ls_a = 1;
-	else if(ra == pmo) ls_a = -1;
-	if(rg == one) ls_g = 1;
-	else if(rg == pmo) ls_g = -1;
-*/
-	int ls_a = (ra == one) - (ra == pmo);
-	int ls_g = (rg == one) - (rg == pmo);
-
-	// Quadratic logic ...
-	if (ls_g == -1) {
-		if (ls_a == 1){
-//			printf("even");
-			return 2;   // restrict n to even
-		}
-		else if (ls_a == -1){
-//			printf("odd");			
-			return 3; // restrict n to odd
-		}
-		else return 0;
+						// there can be a factor when:
+	if(rg == -1) {
+		if(ra == one) return 2;		// restrict n to even
+		else if(ra == pmo) return 3;	// restrict n to odd
+		else return 0;			// impossible
 	}
-	if (ls_g == 1 && ls_a == -1) {
-		return 0; // impossible
+	if(rg == 1 && ra == pmo) {
+		return 0;			// impossible
 	}
 
-	return 1;
+	return 1;				// n is full range
 }
 
 __kernel void setup(	__global ulong4 * g_prime,
@@ -306,8 +255,38 @@ __kernel void setup(	__global ulong4 * g_prime,
 	// parity type counters
 	int count[4] = {0, 0, 0, 0};
 
+	// setup power residue tests
+	ulong expo[13];
+	int r = 0;
+	for(int i=0; i<12; ++i){
+//		expo[r] = ( pm%pres[i] ) ? 0 : pm/pres[i];
+		ulong quot = pm/pres[i];
+		expo[r] = ( pm != (quot*pres[i]) ) ? 0 : quot;
+
+		if(expo[r]){
+#if BASE == 2
+			ulong rg = pow2modlg(prime.s3, expo[r], prime.s0, prime.s1);
+#else
+			ulong rg = powmodlg(prime.s3, expo[r], prime.s0, prime.s1);
+#endif
+			if(rg == prime.s2){
+				++r;			// test is valid for this P
+			}
+		}
+	}
+
+	// always generate for quadratic test
+	expo[12] = pm>>1;
+#if BASE == 2
+	ulong rg = pow2modlg(prime.s3, expo[12], prime.s0, prime.s1);
+#else
+	ulong rg = powmodlg(prime.s3, expo[12], prime.s0, prime.s1);
+#endif
+
+	int resg = (rg == prime.s2) - (rg == pmo);
+
 	// walk backward to get each k_inv
-	for (int i = KCOUNT - 1; i >= 0; --i) {
+	for(int i = KCOUNT - 1; i >= 0; --i) {
 		prev = (i == 0) ? prime.s2 : prefix[i - 1];      // prime.s2 is 'one' in montgomery
 		// k_inv = inv_total * prev
 		ulong k_inv = m_mul(inv_total, prev, prime.s0, prime.s1);
@@ -318,7 +297,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 		ulong hk_inv = (klist[i] > 0) ? m_mul(pmo, k_inv, prime.s0, prime.s1) : k_inv;
 
 		// prefilter skips unsolvable cases
-		int parity = prefilter(hk_inv, prime.s0, prime.s1, prime.s2, prime.s3, pmo, pm);
+		int parity = prefilter(hk_inv, prime.s0, prime.s1, prime.s2, pmo, expo, r, resg);
 		g_parity[adjoffset+i] = parity;
 		g_hadj[adjoffset+i] = hk_inv;
 		count[parity]++;
