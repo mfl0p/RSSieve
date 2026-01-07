@@ -11,6 +11,12 @@ typedef struct {
 	short idx;
 } hash_entry;
 
+typedef struct {
+	ulong hadj;
+	int parity;
+	int kidx;
+} kdata;
+
 // finalization mix step used in MurmurHash3 128-bit to avalanche the bits and produce a well-distributed hash output
 ulong fmix64(ulong k) {
     k ^= k >> 33;
@@ -34,33 +40,16 @@ void hash_insert(__global hash_entry *table, ulong hashed, int idx, uint offset)
 	table[poff].idx = idx;
 }
 
-// r0 + 2^64 * r1 = a * b
-ulong2 mul_wide(const ulong a, const ulong b){
-	ulong2 r;
-#ifdef __NV_CL_C_VERSION
-	const uint a0 = (uint)(a), a1 = (uint)(a >> 32);
-	const uint b0 = (uint)(b), b1 = (uint)(b >> 32);
-	uint c0 = a0 * b0, c1 = mul_hi(a0, b0), c2, c3;
-	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c1) : "r" (a0), "r" (b1), "r" (c1));
-	asm volatile ("madc.hi.u32 %0, %1, %2, 0;" : "=r" (c2) : "r" (a0), "r" (b1));
-	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c2) : "r" (a1), "r" (b1), "r" (c2));
-	asm volatile ("madc.hi.u32 %0, %1, %2, 0;" : "=r" (c3) : "r" (a1), "r" (b1));
-	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c1) : "r" (a1), "r" (b0), "r" (c1));
-	asm volatile ("madc.hi.cc.u32 %0, %1, %2, %3;" : "=r" (c2) : "r" (a1), "r" (b0), "r" (c2));
-	asm volatile ("addc.u32 %0, %1, 0;" : "=r" (c3) : "r" (c3));
-	r.s0 = upsample(c1, c0); r.s1 = upsample(c3, c2);
-#else
-	r.s0 = a * b; r.s1 = mul_hi(a, b);
-#endif
-	return r;
-}
-
+// note: removed Nvidia asm, not needed
+// The scheduler recognizes the dependency of lo and hi multiply.
+// It executes one multiply and routes results to two registers.
 ulong m_mul(ulong a, ulong b, ulong p, ulong q){
-	ulong2 ab = mul_wide(a,b);
-	ulong m = ab.s0 * q;
+	ulong lo = a*b;
+	ulong hi = mul_hi(a,b);
+	ulong m = lo * q;
 	ulong mp = mul_hi(m,p);
-	ulong r = ab.s1 - mp;
-	return ( ab.s1 < mp ) ? r + p : r;
+	ulong r = hi - mp;
+	return ( hi < mp ) ? r + p : r;
 }
 
 ulong add(ulong a, ulong b, ulong p){
@@ -131,37 +120,114 @@ ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
 }
 
 
-__constant int pres[12] = { 29, 23, 19, 17, 13, 11, 9, 8, 7, 5, 4, 3 };
+__constant int pres[10] = { 3, 5, 7, 9, 11, 13, 17, 19, 23, 29 };
+
+// invP = floor(2^64 / P)
+// used for N/P when N ≤ 2^64 − P
+__constant ulong invP[10] = {
+    6148914691236517205UL, // 3
+    3689348814741910323UL, // 5
+    2635249153387078802UL, // 7
+    2049638230412172401UL, // 9
+    1676976733973595601UL, // 11
+    1418980313362273201UL, // 13
+    1085102592571150095UL, // 17
+    970881267037344821UL,  // 19
+    801332342596013033UL,  // 23
+    636094623231363848UL   // 29
+};
+
+
+int good_pr(ulong4 prime, ulong exponent){
+	ulong rg;
+#if BASE == 2
+	rg = pow2modlg(prime.s3, exponent, prime.s0, prime.s1);
+#else
+	rg = powmodlg(prime.s3, exponent, prime.s0, prime.s1);
+#endif
+	if(rg == prime.s2){
+		return 1;	// test is valid for this P
+	}
+	return 0;
+}
+
+
+// setup for power residue tests
+int setup_pr(ulong4 prime, ulong pmo, ulong *expo, int *resg){
+	const ulong pm = prime.s0 - 1;
+	ulong quot;
+	int r = 0;
+	for(int i=0; i<10; ++i){
+ 		// we are calculating
+		// expo[r] = ( pm%pres[i] ) ? 0 : pm/pres[i];
+		/////////////////////////////////////////////
+		// fast division using inverse
+		// quot = mul_hi(invP[i], pm + 1);
+		quot = mul_hi(invP[i], prime.s0);
+		expo[r] = ( pm != (quot*pres[i]) ) ? 0 : quot;
+		if(expo[r]){
+			if(good_pr(prime, expo[r])){
+				++r;
+			}
+		}
+	}
+	// 4
+	expo[r] = ( pm&3 ) ? 0 : pm>>2;
+	if(expo[r]){
+		if(good_pr(prime, expo[r])){
+			++r;
+		}
+	}
+	// 8
+	expo[r] = ( pm&7 ) ? 0 : pm>>3;
+	if(expo[r]){
+		if(good_pr(prime, expo[r])){
+			++r;
+		}
+	}
+	// always generate for quadratic test
+	expo[12] = pm>>1;
+#if BASE == 2
+	ulong rg = pow2modlg(prime.s3, expo[12], prime.s0, prime.s1);
+#else
+	ulong rg = powmodlg(prime.s3, expo[12], prime.s0, prime.s1);
+#endif
+	*resg = (rg == prime.s2) - (rg == pmo);
+
+	return r;
+
+}
+
+
 // prefilter check for solvability
 int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong pmo, ulong *power, int powcnt, int rg) {
 
-	// power residue tests, decending
-	// powmod continues from previous powmod
-	ulong exp, ra, ra2, previous=0;
+	// power residue tests
+	ulong ra;
 	for(int i=0; i<powcnt; ++i){
-		exp = power[i] - previous;
-		ra2 = powmodlg(hk_inv, exp, p, q);
-		ra = (previous) ? m_mul(ra, ra2, p, q) : ra2;
-		previous = power[i];
+		ra = powmodlg(hk_inv, power[i], p, q);
 		if( ra!=one ) return 0;		// impossible
 	}
 
 	// quadratic
-	exp = power[12] - previous;
-	ra2 = powmodlg(hk_inv, exp, p, q);
-	ra = (previous) ? m_mul(ra, ra2, p, q) : ra2;
+	ra = powmodlg(hk_inv, power[12], p, q);
 
-						// there can be a factor when:
+	// If g is quadratic non-residue, g^n alternates residues/nonresidues with n parity
 	if(rg == -1) {
-		if(ra == one) return 2;		// restrict n to even
-		else if(ra == pmo) return 3;	// restrict n to odd
-		else return 0;			// impossible
+		// if a is QR, then n must be even
+		if(ra == one) return 2;
+		// if a is QNR, then n must be odd
+		else if(ra == pmo) return 3;
+		// impossible
+		else return 0;
 	}
+	// If g is QR and a is QNR there is no solution
 	if(rg == 1 && ra == pmo) {
-		return 0;			// impossible
+		// impossible
+		return 0;
 	}
-
-	return 1;				// n is full range
+	// n is full range
+	return 1;
 }
 
 __kernel void setup(	__global ulong4 * g_prime,
@@ -169,8 +235,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 			__global hash_entry * g_htable,
 			__global hash_entry * g_htable_even,
 			__global hash_entry * g_htable_odd,
-			__global ulong * g_hadj,
-			__global char * g_parity,
+			__global kdata * g_k,
 			__global ulong * g_sum ) {
 
 	const uint gid = get_global_id(0);
@@ -190,7 +255,6 @@ __kernel void setup(	__global ulong4 * g_prime,
 	// .s0=p, .s1=q, .s2=one, .s3=two
 	ulong4 prime = g_prime[gid];
 	const ulong pmo = prime.s0 - prime.s2;	// montgomerized p-1
-	const ulong pm = prime.s0 - 1;
 	const uint hashoffset = gid*HSIZE;
 	const uint adjoffset = gid*KCOUNT;
 
@@ -209,7 +273,7 @@ __kernel void setup(	__global ulong4 * g_prime,
 #elif BASE == 5
 	prime.s3 = add(four, prime.s2, prime.s0); // base = montgomerized 4+1
 #elif BASE > 5
-	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1); // base = montgomerized BASE
+	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1); // base = BASE * 2^64
 #endif
 
 	// for batch inversion
@@ -252,38 +316,16 @@ __kernel void setup(	__global ulong4 * g_prime,
 	ulong gQ_inv = m_mul(inv_total, prev, prime.s0, prime.s1);
 	inv_total = m_mul(inv_total, mk[KCOUNT], prime.s0, prime.s1);
 
+	// setup for power residue testing
+	int resg;
+	ulong expo[13];
+	int tests = setup_pr(prime, pmo, expo, &resg);
+
 	// parity type counters
 	int count[4] = {0, 0, 0, 0};
 
-	// setup power residue tests
-	ulong expo[13];
-	int r = 0;
-	for(int i=0; i<12; ++i){
-//		expo[r] = ( pm%pres[i] ) ? 0 : pm/pres[i];
-		ulong quot = pm/pres[i];
-		expo[r] = ( pm != (quot*pres[i]) ) ? 0 : quot;
-
-		if(expo[r]){
-#if BASE == 2
-			ulong rg = pow2modlg(prime.s3, expo[r], prime.s0, prime.s1);
-#else
-			ulong rg = powmodlg(prime.s3, expo[r], prime.s0, prime.s1);
-#endif
-			if(rg == prime.s2){
-				++r;			// test is valid for this P
-			}
-		}
-	}
-
-	// always generate for quadratic test
-	expo[12] = pm>>1;
-#if BASE == 2
-	ulong rg = pow2modlg(prime.s3, expo[12], prime.s0, prime.s1);
-#else
-	ulong rg = powmodlg(prime.s3, expo[12], prime.s0, prime.s1);
-#endif
-
-	int resg = (rg == prime.s2) - (rg == pmo);
+	// k data array position, pack k's that pass power residue/parity testing
+	uint pos = adjoffset;
 
 	// walk backward to get each k_inv
 	for(int i = KCOUNT - 1; i >= 0; --i) {
@@ -297,13 +339,21 @@ __kernel void setup(	__global ulong4 * g_prime,
 		ulong hk_inv = (klist[i] > 0) ? m_mul(pmo, k_inv, prime.s0, prime.s1) : k_inv;
 
 		// prefilter skips unsolvable cases
-		int parity = prefilter(hk_inv, prime.s0, prime.s1, prime.s2, pmo, expo, r, resg);
-		g_parity[adjoffset+i] = parity;
-		g_hadj[adjoffset+i] = hk_inv;
+		int parity = prefilter(hk_inv, prime.s0, prime.s1, prime.s2, pmo, expo, tests, resg);
 		count[parity]++;
+		if(parity){
+			kdata thek = { hk_inv, parity, i };
+			g_k[pos++] = thek; 
+		}
 	}
 
-	// we can skip this p
+	// array not full?  add zero marker
+	if(pos-adjoffset<KCOUNT){
+		kdata thek = { 0, 0, 0 };
+		g_k[pos] = thek;		
+	}
+
+	// we can skip this p if all k have no solutions
 	if(count[0] == KCOUNT){
 		atomic_inc(&g_primecount[3]);
 		g_prime[gid].s0 = 0;

@@ -80,9 +80,7 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseMemObject(pd.d_htable);
 	sclReleaseMemObject(pd.d_htable_even);
 	sclReleaseMemObject(pd.d_htable_odd);
-	sclReleaseMemObject(pd.d_hadj);
-	sclReleaseMemObject(pd.d_primes_out);
-	sclReleaseMemObject(pd.d_parity);
+	sclReleaseMemObject(pd.d_k);
 //	sclReleaseClSoft(pd.check);
 	sclReleaseClSoft(pd.clearn);
 	sclReleaseClSoft(pd.clearresult);
@@ -977,25 +975,13 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_hadj = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(cl_ulong), NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
-                printf( "ERROR: clCreateBuffer failure: hash table\n" );
-		exit(EXIT_FAILURE);
-	}
-	pd.d_parity = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(cl_char), NULL, &err);
+	pd.d_k = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(kdata), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
 		exit(EXIT_FAILURE);
 	}
 	pd.d_primes = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sizeof(cl_ulong4), NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	pd.d_primes_out = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sizeof(cl_ulong4), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
@@ -1040,8 +1026,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_htable);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_htable_even);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_htable_odd);
-	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_hadj);
-	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_parity);
+	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_k);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_sum);
 	ai = 0;
 	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primecount);
@@ -1050,8 +1035,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable);
 	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable_even);
 	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable_odd);
-	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_hadj);
-	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_parity);
+	sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k);
 	
 /*
 	sclSetKernelArg(pd.check, 0, sizeof(cl_mem), &pd.d_primes);

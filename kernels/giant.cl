@@ -17,6 +17,12 @@ typedef struct {
 	short idx;
 } hash_entry;
 
+typedef struct {
+	ulong hadj;
+	int parity;
+	int kidx;
+} kdata;
+
 // finalization mix step used in MurmurHash3 128-bit to avalanche the bits and produce a well-distributed hash output
 ulong fmix64(ulong k) {
     k ^= k >> 33;
@@ -45,33 +51,13 @@ int hash_lookup(__global const hash_entry *table, ulong val, int *idx_out, uint 
 	return 0;
 }
 
-// r0 + 2^64 * r1 = a * b
-ulong2 mul_wide(const ulong a, const ulong b){
-	ulong2 r;
-#ifdef __NV_CL_C_VERSION
-	const uint a0 = (uint)(a), a1 = (uint)(a >> 32);
-	const uint b0 = (uint)(b), b1 = (uint)(b >> 32);
-	uint c0 = a0 * b0, c1 = mul_hi(a0, b0), c2, c3;
-	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c1) : "r" (a0), "r" (b1), "r" (c1));
-	asm volatile ("madc.hi.u32 %0, %1, %2, 0;" : "=r" (c2) : "r" (a0), "r" (b1));
-	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c2) : "r" (a1), "r" (b1), "r" (c2));
-	asm volatile ("madc.hi.u32 %0, %1, %2, 0;" : "=r" (c3) : "r" (a1), "r" (b1));
-	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c1) : "r" (a1), "r" (b0), "r" (c1));
-	asm volatile ("madc.hi.cc.u32 %0, %1, %2, %3;" : "=r" (c2) : "r" (a1), "r" (b0), "r" (c2));
-	asm volatile ("addc.u32 %0, %1, 0;" : "=r" (c3) : "r" (c3));
-	r.s0 = upsample(c1, c0); r.s1 = upsample(c3, c2);
-#else
-	r.s0 = a * b; r.s1 = mul_hi(a, b);
-#endif
-	return r;
-}
-
 ulong m_mul(ulong a, ulong b, ulong p, ulong q){
-	ulong2 ab = mul_wide(a,b);
-	ulong m = ab.s0 * q;
+	ulong lo = a*b;
+	ulong hi = mul_hi(a,b);
+	ulong m = lo * q;
 	ulong mp = mul_hi(m,p);
-	ulong r = ab.s1 - mp;
-	return ( ab.s1 < mp ) ? r + p : r;
+	ulong r = hi - mp;
+	return ( hi < mp ) ? r + p : r;
 }
 
 
@@ -99,8 +85,7 @@ __kernel void giantparity(	__global uint * g_primecount,
 				__global const hash_entry * g_htable,
 				__global const hash_entry * g_htable_e,
 				__global const hash_entry * g_htable_o,
-				__global const ulong * g_hadj,
-				__global const char * g_parity ) {
+				__global kdata * g_k ) {
 
 	const uint gid = get_global_id(0);
 	const uint primepos = gid/MR;
@@ -125,25 +110,23 @@ __kernel void giantparity(	__global uint * g_primecount,
 
 	int r;
 	ulong gamma;
+	uint offset = adjoffset;
 	for(int l=0; l<KCOUNT; ++l){
-		uint offset = adjoffset+l;
-		ulong h_adj = g_hadj[offset];
-		int parity = g_parity[offset];
-		if( !parity || (parity>1 && q>=MM) ){
-			continue;
-		}
+		kdata thek = g_k[offset++];
+		if(!thek.parity) return;
+		if(thek.parity>1 && q>=MM) continue;
 
-		__global const hash_entry *htable = (parity==1) ? g_htable : ( (parity==2) ? g_htable_e : g_htable_o );
+		__global const hash_entry *htable = (thek.parity==1) ? g_htable : ( (thek.parity==2) ? g_htable_e : g_htable_o );
 		for(int i=0; i<STEPS; i++){
-			gamma = (parity==1) ? gm_step[i] : gm_step_parity[i];
-			gamma = m_mul(h_adj, gamma, prime.s0, prime.s1);
+			gamma = (thek.parity==1) ? gm_step[i] : gm_step_parity[i];
+			gamma = m_mul(thek.hadj, gamma, prime.s0, prime.s1);
 			if(hash_lookup(htable, gamma, &r, hashoffset)) {
-				int nstart = (parity==3) ? NMIN+1 : NMIN;
-				int theQ = (parity==1) ? Q : QQ;
+				int nstart = (thek.parity==3) ? NMIN+1 : NMIN;
+				int theQ = (thek.parity==1) ? Q : QQ;
 				int n = nstart + (q+i)*theQ + r;
 				if(n <= NMAX) {
 					uint f = atomic_inc(&g_primecount[2]);
-					factor fac = {prime.s0, n, klist[l]};
+					factor fac = {prime.s0, n, klist[thek.kidx]};
 					g_factor[f] = fac;
 				}
 			}
