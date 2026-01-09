@@ -16,6 +16,9 @@ __kernel void clearn(__global uint *primecount){
 		primecount[6]=0;
 		primecount[9]=0;
 		primecount[10]=0;
+		primecount[20]=0;
+		primecount[21]=0;
+		primecount[22]=0;
 	}
 
 

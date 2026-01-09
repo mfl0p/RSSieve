@@ -34,19 +34,17 @@ ulong fmix64(ulong k) {
 }
 
 // Hash lookup
-int hash_lookup(__global const hash_entry *table, ulong val, int *idx_out, uint offset) {
+int hash_lookup(__local const hash_entry *table, ulong val, int *idx_out) {
 	ulong hashed = fmix64(val);
 	uint pos = hashed & MASK;
 	uint start = pos;
-	uint poff = pos+offset;
-	while(table[poff].idx != -1) {		// used
-		if(table[poff].hash == hashed) {
-			*idx_out = table[poff].idx;
+	while(table[pos].idx != -1) {		// used
+		if(table[pos].hash == hashed) {
+			*idx_out = table[pos].idx;
 			return 1;
 		}
 		pos = (pos + 1) & MASK;            	// wrap around with MASK
 		if(pos == start) break;           	// full cycle
-		poff = pos+offset;
 	}
 	return 0;
 }
@@ -79,58 +77,63 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 }
 
 
-__kernel void giantparity(	__global uint * g_primecount,
+__kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
+				__global uint * g_primecount,
 				__global factor * g_factor,
-				__global const ulong4 * g_prime,
+				__global const ulong8 * g_prime,
 				__global const hash_entry * g_htable,
-				__global const hash_entry * g_htable_e,
-				__global const hash_entry * g_htable_o,
-				__global kdata * g_k ) {
+				__global const kdata * g_k,
+				const int parity ) {
 
 	const uint gid = get_global_id(0);
-	const uint primepos = gid/MR;
-	const uint pcnt = g_primecount[0]; 
+	const uint pcnt = (parity==1) ? g_primecount[20] : (parity==2) ? g_primecount[21] : g_primecount[22];
+	const int primepos = get_group_id(0);
+	const int lid = get_local_id(0);
+	const int ls = get_local_size(0);
 	if(primepos >= pcnt) return;
-	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
-	const ulong4 prime = g_prime[primepos];
-	if(!prime.s0) return;
-	int q = (gid%MR)*STEPS;
-	const uint hashoffset = primepos*HSIZE;
-	const uint adjoffset = primepos*KCOUNT;
+	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv, .s4=hashoffset, .s5=numk
+	const ulong8 prime = g_prime[primepos];
+	const uint hashoffset = (uint)prime.s4*HSIZE;
+	const uint koffset = primepos*KCOUNT;
+	__local hash_entry l_htable[HSIZE];
+	__local kdata l_k[KCOUNT];
+	__local ulong gm_step_start;
+	__local ulong gm_step_inc;
+	const int numk = prime.s5;
 
-	ulong gm_step[STEPS];
-	ulong gm_step_parity[STEPS];
-
-	gm_step[0] = powmodsm(prime.s3, q, prime.s0, prime.s1, prime.s2);
-	gm_step_parity[0] = m_mul(gm_step[0], gm_step[0], prime.s0, prime.s1);
-	for(int i=1; i<STEPS; i++){
-		gm_step[i] = m_mul(gm_step[i-1], prime.s3, prime.s0, prime.s1);
-		gm_step_parity[i] = m_mul(gm_step[i], gm_step[i], prime.s0, prime.s1);
+	for(int i=lid; i<HSIZE; i+=ls){
+		l_htable[i] = g_htable[i+hashoffset];
 	}
 
-	int r;
-	ulong gamma;
-	uint offset = adjoffset;
-	for(int l=0; l<KCOUNT; ++l){
-		kdata thek = g_k[offset++];
-		if(!thek.parity) return;
-		if(thek.parity>1 && q>=MM) continue;
+	if(lid<numk){
+		l_k[lid] = g_k[koffset+lid];
+	}
 
-		__global const hash_entry *htable = (thek.parity==1) ? g_htable : ( (thek.parity==2) ? g_htable_e : g_htable_o );
-		for(int i=0; i<STEPS; i++){
-			gamma = (thek.parity==1) ? gm_step[i] : gm_step_parity[i];
-			gamma = m_mul(thek.hadj, gamma, prime.s0, prime.s1);
-			if(hash_lookup(htable, gamma, &r, hashoffset)) {
-				int nstart = (thek.parity==3) ? NMIN+1 : NMIN;
-				int theQ = (thek.parity==1) ? Q : QQ;
-				int n = nstart + (q+i)*theQ + r;
+	if(lid == 0){
+		gm_step_start = (parity==1) ? prime.s3 : m_mul(prime.s3, prime.s3, prime.s0, prime.s1);
+		gm_step_inc = powmodsm(gm_step_start, 1024, prime.s0, prime.s1, prime.s2);
+	}
+
+	barrier(CLK_LOCAL_MEM_FENCE);
+
+	ulong thread_gm_step = powmodsm(gm_step_start, lid, prime.s0, prime.s1, prime.s2);
+
+	int end = (parity==1) ? M : MM;
+	for(int q=lid; q<end; q+=ls){
+		for(int i=0; i<numk; ++i){
+			ulong gamma = m_mul(l_k[i].hadj, thread_gm_step, prime.s0, prime.s1);
+			int r;
+			if(hash_lookup(l_htable, gamma, &r)) {
+				int nstart = (parity==3) ? NMIN+1 : NMIN;
+				int theQ = (parity==1) ? Q : QQ;
+				int n = nstart + q*theQ + r;
 				if(n <= NMAX) {
 					uint f = atomic_inc(&g_primecount[2]);
-					factor fac = {prime.s0, n, klist[thek.kidx]};
+					factor fac = {prime.s0, n, klist[l_k[i].kidx]};
 					g_factor[f] = fac;
 				}
 			}
 		}
+		thread_gm_step = m_mul(thread_gm_step, gm_step_inc, prime.s0, prime.s1);
 	}
 }
-

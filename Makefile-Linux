@@ -5,13 +5,13 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 0
-VERSION_MINOR := 6
+VERSION_MINOR := 7
 date := $(shell date +%Y%m%d)
 
 APP = RSSieve-linux64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date)
 
-SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/giant.cl kernels/init.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl putil.c putil.h verify_factor.c verify_factor.h
-KERNEL_HEADERS = kernels/giant.h kernels/init.h kernels/clearn.h kernels/clearresult.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/sort.cl kernels/giant.cl kernels/init.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl putil.c putil.h verify_factor.c verify_factor.h
+KERNEL_HEADERS = kernels/sort.h kernels/giant.h kernels/init.h kernels/clearn.h kernels/clearresult.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h
 OBJ = main.o cl_sieve.o simpleCL.o putil.o verify_factor.o
 
 OCL_INC = -I /usr/local/cuda/include/CL/
