@@ -4,13 +4,38 @@ typedef struct {
 	int kidx;
 } kdata;
 
+ulong m_mul(ulong a, ulong b, ulong p, ulong q){
+	ulong lo = a*b;
+	ulong hi = mul_hi(a,b);
+	ulong m = lo * q;
+	ulong mp = mul_hi(m,p);
+	ulong r = hi - mp;
+	return ( hi < mp ) ? r + p : r;
+}
+
+// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
+ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
+	if(!exp)return one;
+	if(exp==1)return mbase;
+	uint curBit = 0x80000000;
+	curBit >>= ( clz(exp) + 1 );
+	ulong a = mbase;
+	while( curBit )	{
+		a = m_mul(a,a,p,q);
+		if(exp & curBit){
+			a = m_mul(a,mbase,p,q);
+		}
+		curBit >>= 1;
+	}
+	return a;
+}
 
 __kernel void sort(	__global uint * g_primecount,
 			__global const ulong4 * g_prime,
 			__global ulong8 * g_prime_full,
 			__global ulong8 * g_prime_even,
 			__global ulong8 * g_prime_odd,
-			__global kdata * g_k,
+			__global const kdata * g_k,
 			__global kdata * g_k_full,
 			__global kdata * g_k_even,
 			__global kdata * g_k_odd ) {
@@ -21,6 +46,7 @@ __kernel void sort(	__global uint * g_primecount,
 	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
 	const ulong4 prime = g_prime[gid];
 	if(!prime.s0) return;
+	uint hashoffset = gid*HSIZE;
 	uint primepos_full;
 	uint primepos_even;
 	uint primepos_odd;
@@ -63,15 +89,23 @@ __kernel void sort(	__global uint * g_primecount,
 		}
 	}
 
+	ulong gQQ_inv, gQQ_step_inc;
+
+	if(ke || ko){
+		gQQ_inv = m_mul(prime.s3, prime.s3, prime.s0, prime.s1);
+		gQQ_step_inc = powmodsm(gQQ_inv, 1024, prime.s0, prime.s1, prime.s2);
+	}
+
 	if(kf){
-		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gid, kf, 0, 0);
+		ulong gQ_step_inc = powmodsm(prime.s3, 1024, prime.s0, prime.s1, prime.s2);
+		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gQ_step_inc, hashoffset, kf, 0);
 	}
 
 	if(ke){
-		g_prime_even[primepos_even] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gid, ke, 0, 0);
+		g_prime_even[primepos_even] = (ulong8)(prime.s0, prime.s1, prime.s2, gQQ_inv, gQQ_step_inc, hashoffset, ke, 0);
 	}
 
 	if(ko){
-		g_prime_odd[primepos_odd] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gid, ko, 0, 0);
+		g_prime_odd[primepos_odd] = (ulong8)(prime.s0, prime.s1, prime.s2, gQQ_inv, gQQ_step_inc, hashoffset, ko, 0);
 	}
 }

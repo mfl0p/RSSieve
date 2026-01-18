@@ -91,15 +91,13 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 	const int lid = get_local_id(0);
 	const int ls = get_local_size(0);
 	if(primepos >= pcnt) return;
-	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv, .s4=hashoffset, .s5=numk
+	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv, .s4=gQ_step_inc, .s5=hashoffset, .s6=numk
 	const ulong8 prime = g_prime[primepos];
-	const uint hashoffset = (uint)prime.s4*HSIZE;
 	const uint koffset = primepos*KCOUNT;
 	__local hash_entry l_htable[HSIZE];
 	__local kdata l_k[KCOUNT];
-	__local ulong gm_step_start;
-	__local ulong gm_step_inc;
-	const int numk = prime.s5;
+	const uint hashoffset = prime.s5;
+	const int numk = prime.s6;
 
 	for(int i=lid; i<HSIZE; i+=ls){
 		l_htable[i] = g_htable[i+hashoffset];
@@ -109,14 +107,9 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 		l_k[lid] = g_k[koffset+lid];
 	}
 
-	if(lid == 0){
-		gm_step_start = (parity==1) ? prime.s3 : m_mul(prime.s3, prime.s3, prime.s0, prime.s1);
-		gm_step_inc = powmodsm(gm_step_start, 1024, prime.s0, prime.s1, prime.s2);
-	}
-
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-	ulong thread_gm_step = powmodsm(gm_step_start, lid, prime.s0, prime.s1, prime.s2);
+	ulong thread_gm_step = powmodsm(prime.s3, lid, prime.s0, prime.s1, prime.s2);
 
 	int end = (parity==1) ? M : MM;
 	for(int q=lid; q<end; q+=ls){
@@ -134,6 +127,6 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 				}
 			}
 		}
-		thread_gm_step = m_mul(thread_gm_step, gm_step_inc, prime.s0, prime.s1);
+		thread_gm_step = m_mul(thread_gm_step, prime.s4, prime.s0, prime.s1);
 	}
 }
