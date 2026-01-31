@@ -835,23 +835,16 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
         while (hsize < 2*Q) hsize <<= 1;
 	sd.hsize = (int32_t)hsize;
 
-	// steps per giant kernel thread
-	uint32_t steps = 8;
-
-	// m reduced, steps per iteration in giant kernel
-	uint32_t mr = (uint32_t) ceil((double)m / steps);
-	mr = (uint32_t) (ceil((double)mr / 32))*32;		// scale by warp size
-
 	// for parity restricted P
 	uint32_t QQ = Q<<1;
 	uint32_t mm = (uint32_t) ceil((double)L / QQ);
 
-	printf("-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DMR=%u -DBASE=%u -DSTEPS=%u\n",
-		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, mr, st.base, steps);
+	printf("-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u\n",
+		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, st.base);
 
 	char cldef[256];
-	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DMR=%u -DBASE=%u -DSTEPS=%u",
-		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, mr, st.base, steps);
+	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u",
+		sd.hsize, sd.hsize-1, Q, m, sd.kcount, st.nmin, st.nmax, QQ, mm, st.base);
 
 	// setup each k as part of a __constant kernel array
 	char *const_str = generate_constant_array_string(h_klist, sd.kcount, "klist");

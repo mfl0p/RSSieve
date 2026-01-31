@@ -120,24 +120,6 @@ ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
 }
 
 
-__constant int pres[10] = { 3, 5, 7, 9, 11, 13, 17, 19, 23, 29 };
-
-// invP = floor(2^64 / P)
-// used for N/P when N ≤ 2^64 − P
-__constant ulong invP[10] = {
-    6148914691236517205UL, // 3
-    3689348814741910323UL, // 5
-    2635249153387078802UL, // 7
-    2049638230412172401UL, // 9
-    1676976733973595601UL, // 11
-    1418980313362273201UL, // 13
-    1085102592571150095UL, // 17
-    970881267037344821UL,  // 19
-    801332342596013033UL,  // 23
-    636094623231363848UL   // 29
-};
-
-
 int good_pr(ulong4 prime, ulong exponent){
 	ulong rg;
 #if BASE == 2
@@ -153,38 +135,36 @@ int good_pr(ulong4 prime, ulong exponent){
 
 
 // setup for power residue tests
+// literal division will be converted to something faster by the compiler
+// probably a mul+shift
 int setup_pr(ulong4 prime, ulong pmo, ulong *expo, int *resg){
 	const ulong pm = prime.s0 - 1;
-	ulong quot;
 	int r = 0;
-	for(int i=0; i<10; ++i){
- 		// we are calculating
-		// expo[r] = ( pm%pres[i] ) ? 0 : pm/pres[i];
-		/////////////////////////////////////////////
-		// fast division using inverse
-		// quot = mul_hi(invP[i], pm + 1);
-		quot = mul_hi(invP[i], prime.s0);
-		expo[r] = ( pm != (quot*pres[i]) ) ? 0 : quot;
-		if(expo[r]){
-			if(good_pr(prime, expo[r])){
-				++r;
-			}
-		}
-	}
-	// 4
-	expo[r] = ( pm&3 ) ? 0 : pm>>2;
-	if(expo[r]){
-		if(good_pr(prime, expo[r])){
-			++r;
-		}
-	}
-	// 8
-	expo[r] = ( pm&7 ) ? 0 : pm>>3;
-	if(expo[r]){
-		if(good_pr(prime, expo[r])){
-			++r;
-		}
-	}
+	expo[r] = pm/3;
+	if( (pm == expo[r]*3) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm>>2; // pm/4
+	if( (pm&3 == 0) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/5;
+	if( (pm == expo[r]*5) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/7;
+	if( (pm == expo[r]*7) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm>>3; // pm/8
+	if( (pm&7 == 0) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/9;
+	if( (pm == expo[r]*9) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/11;
+	if( (pm == expo[r]*11) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/13;
+	if( (pm == expo[r]*13) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/17;
+	if( (pm == expo[r]*17) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/19;
+	if( (pm == expo[r]*19) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/23;
+	if( (pm == expo[r]*23) && good_pr(prime, expo[r]) ) r++;
+	expo[r] = pm/29;
+	if( (pm == expo[r]*29) && good_pr(prime, expo[r]) ) r++;
+
 	// always generate for quadratic test
 	expo[12] = pm>>1;
 #if BASE == 2
@@ -195,7 +175,6 @@ int setup_pr(ulong4 prime, ulong pmo, ulong *expo, int *resg){
 	*resg = (rg == prime.s2) - (rg == pmo);
 
 	return r;
-
 }
 
 
