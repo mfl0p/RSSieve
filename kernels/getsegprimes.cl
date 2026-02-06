@@ -147,7 +147,7 @@ __constant uint p109[109] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 
 __constant uint p113[113] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2147483648, 0, 1073741824, 0, 536870912, 0, 268435456, 0, 134217728, 0, 67108864, 0, 33554432, 0, 16777216, 0, 8388608, 0, 4194304, 0, 2097152, 0, 1048576, 0, 524288, 0, 262144, 0, 131072, 0, 65536, 0, 32768, 0, 16384, 0, 8192, 0, 4096, 0, 2048, 0, 1024, 0, 512, 0, 256, 0, 128, 0, 64, 0, 32, 0, 16, 0, 8, 0, 4, 0, 2, 0 };
 
-__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulong low, ulong high, int wheelidx, __global ulong4 *g_prime, __global uint *g_primecount){
+__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulong low, ulong high, int wheelidx, __global ulong8 *g_prime, __global uint *g_primecount){
 
 	const uint gid = get_global_id(0);
 	const uint lid = get_local_id(0);
@@ -197,8 +197,8 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulo
 		ulong nmo = p - one;
 		ulong two = add(one, one, p);
 		if( strong_prp_two(p, q, one, two, nmo) ){
-			// .s0=p, .s1=q, .s2=one, .s3=two
-			g_prime[ atomic_inc(&g_primecount[0]) ] = (ulong4)( p, q, one, two );
+			// .s0=p, .s1=q, .s2=one, .s3=two, .s3=pmo
+			g_prime[ atomic_inc(&g_primecount[0]) ] = (ulong8)( p, q, one, two, nmo, 0, 0, 0 );
 		}
 	}
 

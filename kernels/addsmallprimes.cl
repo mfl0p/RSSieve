@@ -35,7 +35,7 @@ __kernel void addsmallprimes(ulong low, ulong high, __global ulong8 *g_prime, __
 	ulong nmo = p - one;
 	ulong two = add(one, one, p);
 
-	g_prime[ atomic_inc(&g_primecount[0]) ] = (ulong8)( p, q, 0, one, two, nmo, 0, 0 );
+	g_prime[ atomic_inc(&g_primecount[0]) ] = (ulong8)( p, q, one, two, nmo, 0, 0, 0 );
 
 }
 

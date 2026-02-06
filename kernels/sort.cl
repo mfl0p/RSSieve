@@ -30,8 +30,23 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 	return a;
 }
 
+// left to right powmod 2^exp mod P, with 32 bit exponent
+ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
+	uint curBit = 0x80000000;
+	curBit >>= ( clz(exp) + 1 );
+	ulong a = two;
+	while( curBit ){
+		a = m_mul(a, a, p, q);
+		if(exp & curBit){
+			a = add(a, a, p);	// base 2 we can add
+		}
+		curBit >>= 1;
+	}
+	return a;
+}
+
 __kernel void sort(	__global uint * g_primecount,
-			__global const ulong4 * g_prime,
+			__global const ulong8 * g_prime,
 			__global ulong8 * g_prime_full,
 			__global ulong8 * g_prime_even,
 			__global ulong8 * g_prime_odd,
@@ -43,10 +58,9 @@ __kernel void sort(	__global uint * g_primecount,
 	const uint gid = get_global_id(0);
 	const uint pcnt = g_primecount[0]; 
 	if(gid >= pcnt) return;
-	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
-	const ulong4 prime = g_prime[gid];
+	// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=pmo, .s5=gQ_inv
+	const ulong8 prime = g_prime[gid];
 	if(!prime.s0) return;
-	uint hashoffset = gid*HSIZE;
 	uint primepos_full;
 	uint primepos_even;
 	uint primepos_odd;
@@ -89,23 +103,36 @@ __kernel void sort(	__global uint * g_primecount,
 		}
 	}
 
-	ulong gQQ_inv, gQQ_step_inc;
+	ulong gQQ_inv, gQQ_step_inc, gjj_inc;
 
 	if(ke || ko){
-		gQQ_inv = m_mul(prime.s3, prime.s3, prime.s0, prime.s1);
+		gQQ_inv = m_mul(prime.s5, prime.s5, prime.s0, prime.s1);
 		gQQ_step_inc = powmodsm(gQQ_inv, 1024, prime.s0, prime.s1, prime.s2);
+#if BASE == 2
+		gjj_inc = pow2modsm(prime.s3, 2048, prime.s0, prime.s1);
+#else
+		gjj_inc = powmodsm(prime.s3, 2048, prime.s0, prime.s1, prime.s2);
+#endif
 	}
 
 	if(kf){
-		ulong gQ_step_inc = powmodsm(prime.s3, 1024, prime.s0, prime.s1, prime.s2);
-		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gQ_step_inc, hashoffset, kf, 0);
+		ulong gQ_step_inc = powmodsm(prime.s5, 1024, prime.s0, prime.s1, prime.s2);
+#if BASE == 2
+		ulong gj_inc = pow2modsm(prime.s3, 1024, prime.s0, prime.s1);
+#else
+		ulong gj_inc = powmodsm(prime.s3, 1024, prime.s0, prime.s1, prime.s2);
+#endif
+		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=kcount_full
+		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gj_inc, prime.s5, gQ_step_inc, kf);
 	}
 
 	if(ke){
-		g_prime_even[primepos_even] = (ulong8)(prime.s0, prime.s1, prime.s2, gQQ_inv, gQQ_step_inc, hashoffset, ke, 0);
+		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gjj_inc, .s5=gQQ_inv, .s6=gQQ_step_inc, .s7=kcount_even
+		g_prime_even[primepos_even] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gjj_inc, gQQ_inv, gQQ_step_inc, ke);
 	}
 
 	if(ko){
-		g_prime_odd[primepos_odd] = (ulong8)(prime.s0, prime.s1, prime.s2, gQQ_inv, gQQ_step_inc, hashoffset, ko, 0);
+		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gjj_inc, .s5=gQQ_inv, .s6=gQQ_step_inc, .s7=kcount_odd
+		g_prime_odd[primepos_odd] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gjj_inc, gQQ_inv, gQQ_step_inc, ko);
 	}
 }

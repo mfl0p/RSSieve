@@ -1,11 +1,5 @@
 
 // cl_sieve.h
-
-typedef struct {
-	cl_ulong hash;
-	cl_short idx;
-} hash_entry;
-
 typedef struct {
 	cl_ulong p;
 	cl_int n;
@@ -35,9 +29,8 @@ typedef struct {
 	cl_mem d_sum;
 	cl_mem d_primes, d_primes_full, d_primes_even, d_primes_odd;
 	cl_mem d_primecount;
-	cl_mem d_htable, d_htable_even, d_htable_odd;
 	cl_mem d_k, d_k_full, d_k_even, d_k_odd;
-	sclSoft setup, sort, clearn, clearresult, getsegprimes, addsmallprimes, init, giantparity;
+	sclSoft setup, sort, clearn, clearresult, getsegprimes, addsmallprimes, giantparity;
 } progData;
 
 void cl_sieve( sclHard hardware, workStatus & st, searchData & sd );

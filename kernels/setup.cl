@@ -120,7 +120,7 @@ ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
 }
 
 
-int good_pr(ulong4 prime, ulong exponent){
+int good_pr(ulong8 prime, ulong exponent){
 	ulong rg;
 #if BASE == 2
 	rg = pow2modlg(prime.s3, exponent, prime.s0, prime.s1);
@@ -137,19 +137,19 @@ int good_pr(ulong4 prime, ulong exponent){
 // setup for power residue tests
 // literal division will be converted to something faster by the compiler
 // probably a mul+shift
-int setup_pr(ulong4 prime, ulong pmo, ulong *expo, int *resg){
+int setup_pr(ulong8 prime, ulong pmo, ulong *expo, int *resg){
 	const ulong pm = prime.s0 - 1;
 	int r = 0;
 	expo[r] = pm/3;
 	if( (pm == expo[r]*3) && good_pr(prime, expo[r]) ) r++;
 	expo[r] = pm>>2; // pm/4
-	if( (pm&3 == 0) && good_pr(prime, expo[r]) ) r++;
+	if( ((pm&3) == 0) && good_pr(prime, expo[r]) ) r++;
 	expo[r] = pm/5;
 	if( (pm == expo[r]*5) && good_pr(prime, expo[r]) ) r++;
 	expo[r] = pm/7;
 	if( (pm == expo[r]*7) && good_pr(prime, expo[r]) ) r++;
 	expo[r] = pm>>3; // pm/8
-	if( (pm&7 == 0) && good_pr(prime, expo[r]) ) r++;
+	if( ((pm&7) == 0) && good_pr(prime, expo[r]) ) r++;
 	expo[r] = pm/9;
 	if( (pm == expo[r]*9) && good_pr(prime, expo[r]) ) r++;
 	expo[r] = pm/11;
@@ -209,11 +209,8 @@ int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong pmo, ulong *power
 	return 1;
 }
 
-__kernel void setup(	__global ulong4 * g_prime,
+__kernel void setup(	__global ulong8 * g_prime,
 			__global uint * g_primecount,
-			__global hash_entry * g_htable,
-			__global hash_entry * g_htable_even,
-			__global hash_entry * g_htable_odd,
 			__global kdata * g_k,
 			__global ulong * g_sum ) {
 
@@ -231,10 +228,8 @@ __kernel void setup(	__global ulong4 * g_prime,
 		}
 	}
 
-	// .s0=p, .s1=q, .s2=one, .s3=two
-	ulong4 prime = g_prime[gid];
-	const ulong pmo = prime.s0 - prime.s2;	// montgomerized p-1
-	const uint hashoffset = gid*HSIZE;
+	// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=pmo, .s5=gQ_inv
+	ulong8 prime = g_prime[gid];
 	const uint adjoffset = gid*KCOUNT;
 
 	ulong four = add(prime.s3, prime.s3, prime.s0);
@@ -253,6 +248,9 @@ __kernel void setup(	__global ulong4 * g_prime,
 	prime.s3 = add(four, prime.s2, prime.s0); // base = montgomerized 4+1
 #elif BASE > 5
 	prime.s3 = m_mul(BASE, r2, prime.s0, prime.s1); // base = BASE * 2^64
+#endif
+#if BASE != 2
+	g_prime[gid].s3 = prime.s3; // store montgomerized base to global
 #endif
 
 	// for batch inversion
@@ -292,13 +290,13 @@ __kernel void setup(	__global ulong4 * g_prime,
 	}
 
 	ulong prev = prefix[KCOUNT-1];
-	ulong gQ_inv = m_mul(inv_total, prev, prime.s0, prime.s1);
+	g_prime[gid].s5 = m_mul(inv_total, prev, prime.s0, prime.s1);	// store gQ_inv to global
 	inv_total = m_mul(inv_total, mk[KCOUNT], prime.s0, prime.s1);
 
 	// setup for power residue testing
 	int resg;
 	ulong expo[13];
-	int tests = setup_pr(prime, pmo, expo, &resg);
+	int tests = setup_pr(prime, prime.s4, expo, &resg);
 
 	// parity type counters
 	int count[4] = {0, 0, 0, 0};
@@ -315,10 +313,10 @@ __kernel void setup(	__global ulong4 * g_prime,
 		inv_total = m_mul(inv_total, mk[i], prime.s0, prime.s1);
 
 		// compute hk_inv
-		ulong hk_inv = (klist[i] > 0) ? m_mul(pmo, k_inv, prime.s0, prime.s1) : k_inv;
+		ulong hk_inv = (klist[i] > 0) ? m_mul(prime.s4, k_inv, prime.s0, prime.s1) : k_inv;
 
 		// prefilter skips unsolvable cases
-		int parity = prefilter(hk_inv, prime.s0, prime.s1, prime.s2, pmo, expo, tests, resg);
+		int parity = prefilter(hk_inv, prime.s0, prime.s1, prime.s2, prime.s4, expo, tests, resg);
 		count[parity]++;
 		if(parity){
 			kdata thek = { hk_inv, parity, i };
@@ -352,44 +350,6 @@ __kernel void setup(	__global ulong4 * g_prime,
 	if(count[3]){		// odd
 		atomic_add(&g_primecount[8],count[3]);
 	}
-
-	// build baby steps, offset by even NMIN
-	// BASE^NMIN mod P
-#if BASE == 2
-	ulong gj = pow2modsm(prime.s3, NMIN, prime.s0, prime.s1);
-#else
-	ulong gj = powmodsm(prime.s3, NMIN, prime.s0, prime.s1);
-#endif
-
-	for(int j = 0; j < QQ; j++) {
-		if(j>=Q && !count[2] && !count[3]) break;
-
-		ulong hashed = fmix64(gj);
-
-		if( j < Q && count[1] ){
-			hash_insert(g_htable, hashed, j, hashoffset);
-		}
-		if( (j&1) ){
-			if( count[3] ){
-				hash_insert(g_htable_odd, hashed, j-1, hashoffset);
-			}
-		}
-		else{
-			if( count[2] ){
-				hash_insert(g_htable_even, hashed, j, hashoffset);
-			}
-		}
-
-		// gj * BASE mod P
-#if BASE == 2
-		gj = add(gj, gj, prime.s0);
-#else
-		gj = m_mul(gj, prime.s3, prime.s0, prime.s1);
-#endif
-	}
-
-	// .s0=p, .s1=q, .s2=one, .s3=gQ_inv
-	g_prime[gid].s3 = gQ_inv;
 
 }
 

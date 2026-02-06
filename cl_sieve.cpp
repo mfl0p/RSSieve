@@ -27,7 +27,6 @@
 #include "getsegprimes.h"
 #include "addsmallprimes.h"
 #include "setup.h"
-#include "init.h"
 #include "giant.h"
 #include "sort.h"
 
@@ -78,16 +77,12 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseMemObject(pd.d_sum);
 	sclReleaseMemObject(pd.d_primes);
 	sclReleaseMemObject(pd.d_primecount);
-	sclReleaseMemObject(pd.d_htable);
-	sclReleaseMemObject(pd.d_htable_even);
-	sclReleaseMemObject(pd.d_htable_odd);
 	sclReleaseMemObject(pd.d_k);
 //	sclReleaseClSoft(pd.check);
 	sclReleaseClSoft(pd.clearn);
 	sclReleaseClSoft(pd.clearresult);
         sclReleaseClSoft(pd.getsegprimes);
         sclReleaseClSoft(pd.addsmallprimes);
-	sclReleaseClSoft(pd.init);
 	sclReleaseClSoft(pd.setup);
 	sclReleaseClSoft(pd.sort);
 }
@@ -819,7 +814,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
         pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware, NULL);
         pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware, NULL);
         pd.addsmallprimes = sclGetCLSoftware(addsmallprimes_cl,"addsmallprimes",hardware, NULL);
-	pd.init = sclGetCLSoftware(init_cl,"init",hardware, NULL);
 	if(st.pmax < 0xFFFFFFFFFF000000){
 	        pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware, NULL);
 	}
@@ -946,37 +940,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		exit(EXIT_FAILURE);
 	}
 
-	uint64_t hs = (uint64_t)sd.psize * sd.hsize;
-	sd.numhash = hs;
-	hs *= sizeof(hash_entry);
-//	printf("m:%d L:%d psize:%u\n",sd.m,sd.L,sd.psize);
-	printf("gpu hash table has %" PRIu64 " elements\n",sd.numhash);
-	printf("gpu hash table size is %d elements per thread\n",sd.hsize);
-	printf("gpu hash table memory used is %" PRIu64 " megabytes\n", hs/1000000);
-	printf("gpu max malloc is %" PRIu64 " megabytes\n", sd.maxmalloc/1000000);
-	if(hs > sd.maxmalloc){
-		fprintf(stderr, "ERROR: hash table too large!\n");
-                printf( "ERROR: hash table too large!\n");
-		exit(EXIT_FAILURE);
-	}
-	pd.d_htable = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, hs, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
-                printf( "ERROR: clCreateBuffer failure: hash table\n" );
-		exit(EXIT_FAILURE);
-	}
-	pd.d_htable_even = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, hs, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
-                printf( "ERROR: clCreateBuffer failure: hash table\n" );
-		exit(EXIT_FAILURE);
-	}
-	pd.d_htable_odd = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, hs, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
-                printf( "ERROR: clCreateBuffer failure: hash table\n" );
-		exit(EXIT_FAILURE);
-	}
 	pd.d_k = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(kdata), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
@@ -1001,7 +964,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_primes = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sizeof(cl_ulong4), NULL, &err);
+	pd.d_primes = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sizeof(cl_ulong8), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
@@ -1036,7 +999,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetGlobalSize( pd.getsegprimes, (sd.range/60)+1 );
 	sclSetGlobalSize( pd.addsmallprimes, 64 );
 	sclSetGlobalSize( pd.setup, sd.psize );
-	sclSetGlobalSize( pd.init, sd.numhash );
 	sclSetGlobalSize( pd.giantparity, sd.psize*1024 );
 	sclSetGlobalSize( pd.sort, sd.psize );
 
@@ -1055,16 +1017,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetKernelArg(pd.addsmallprimes, 3, sizeof(cl_mem), &pd.d_primecount);
 
 	int ai = 0;
-	sclSetKernelArg(pd.init, ai++, sizeof(cl_mem), &pd.d_htable);
-	sclSetKernelArg(pd.init, ai++, sizeof(cl_mem), &pd.d_htable_even);
-	sclSetKernelArg(pd.init, ai++, sizeof(cl_mem), &pd.d_htable_odd);
-	sclSetKernelArg(pd.init, ai++, sizeof(uint64_t), &sd.numhash);
 	ai = 0;
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primecount);
-	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_htable);
-	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_htable_even);
-	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_htable_odd);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_k);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_sum);
 	ai = 0;
@@ -1159,23 +1114,18 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.getsegprimes, 2, sizeof(int32_t), &wheelidx);
 		sclEnqueueKernel(hardware, pd.getsegprimes);
 
-		// initialize hash tables
+		// setup sieve prime data
 		if(kernelq == 0){
-			launchEvent = sclEnqueueKernelEvent(hardware, pd.init);
+			launchEvent = sclEnqueueKernelEvent(hardware, pd.setup);
 		}
 		else{
-			sclEnqueueKernel(hardware, pd.init);
+			sclEnqueueKernel(hardware, pd.setup);
 		}
 		if(++kernelq == maxq){
 			// limit cl queue depth and sleep cpu
 			waitOnEvent(hardware, launchEvent);
 			kernelq = 0;
 		}
-
-		// setup sieve prime data and baby steps
-		sclEnqueueKernel(hardware, pd.setup);
-//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.setup);
-//		printf("setup kernel time %0.2fms\n",kernel_ms);
 
 		sclEnqueueKernel(hardware, pd.sort);
 
@@ -1185,7 +1135,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primecount);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_factor);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primes_full);
-		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k_full);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
 		sclEnqueueKernel(hardware, pd.giantparity);
@@ -1195,7 +1144,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primecount);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_factor);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primes_even);
-		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable_even);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k_even);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
 		sclEnqueueKernel(hardware, pd.giantparity);
@@ -1205,11 +1153,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primecount);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_factor);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primes_odd);
-		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable_odd);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k_odd);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
 		sclEnqueueKernel(hardware, pd.giantparity);
-
 
 
 //		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);
