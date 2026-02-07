@@ -1,44 +1,16 @@
 /*
 
-	setup.cl - Bryan Little 9/2025, montgomery arithmetic by Yves Gallot
+	setup.cl - Bryan Little 2/2026, montgomery arithmetic by Yves Gallot
 
-	setup for testing each sieve prime, then do the baby steps of the BSGS algorithm
+	setup for testing each sieve prime
 
 */
-
-typedef struct {
-	ulong hash;
-	short idx;
-} hash_entry;
 
 typedef struct {
 	ulong hadj;
 	int parity;
 	int kidx;
 } kdata;
-
-// finalization mix step used in MurmurHash3 128-bit to avalanche the bits and produce a well-distributed hash output
-ulong fmix64(ulong k) {
-    k ^= k >> 33;
-    k *= 0xff51afd7ed558ccdUL;
-    k ^= k >> 33;
-    k *= 0xc4ceb9fe1a85ec53UL;
-    k ^= k >> 33;
-    return k;
-}
-
-// Simple hash insert (linear probing, power-of-2 sized table)
-void hash_insert(__global hash_entry *table, ulong hashed, int idx, uint offset) {
-	uint pos = hashed & MASK;	          	// faster than val % size
-	uint poff = pos+offset;
-	while(table[poff].idx != -1) {		// used
-		if(table[poff].hash == hashed) return;	// keep the first index
-		pos = (pos + 1) & MASK;            	// wrap around with MASK
-		poff = pos+offset;
-	}
-	table[poff].hash = hashed;
-	table[poff].idx = idx;
-}
 
 // note: removed Nvidia asm, not needed
 // The scheduler recognizes the dependency of lo and hi multiply.

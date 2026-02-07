@@ -188,7 +188,7 @@ int main(int argc, char *argv[])
 { 
 	sclHard hardware = {};
 	searchData sd = {};
-	sd.numresults = 1000000;
+	sd.numresults = 100000000;
 	sd.write_state_a_next = true;
 	workStatus st = {};
 

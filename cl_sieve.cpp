@@ -636,7 +636,7 @@ void profileGPU(progData & pd, workStatus & st, searchData & sd, sclHard hardwar
 	// calculate approximate chunk size based on gpu's compute units
 	uint64_t start = st.p;
 
-	uint64_t range_primes = sd.computeunits * 256;
+	uint64_t range_primes = sd.computeunits * 512;
 
 	double C = range_primes + start / log(start);
 	// x is the initial guess
@@ -1112,14 +1112,11 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.getsegprimes, 0, sizeof(uint64_t), &kernel_start);
 		sclSetKernelArg(pd.getsegprimes, 1, sizeof(uint64_t), &stop);
 		sclSetKernelArg(pd.getsegprimes, 2, sizeof(int32_t), &wheelidx);
-		sclEnqueueKernel(hardware, pd.getsegprimes);
-
-		// setup sieve prime data
 		if(kernelq == 0){
-			launchEvent = sclEnqueueKernelEvent(hardware, pd.setup);
+			launchEvent = sclEnqueueKernelEvent(hardware, pd.getsegprimes);
 		}
 		else{
-			sclEnqueueKernel(hardware, pd.setup);
+			sclEnqueueKernel(hardware, pd.getsegprimes);
 		}
 		if(++kernelq == maxq){
 			// limit cl queue depth and sleep cpu
@@ -1127,7 +1124,13 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 			kernelq = 0;
 		}
 
+		sclEnqueueKernel(hardware, pd.setup);
+//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.setup);
+//		printf("setup kernel time %0.2fms\n",kernel_ms);
+
 		sclEnqueueKernel(hardware, pd.sort);
+//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.sort);
+//		printf("sort kernel time %0.2fms\n",kernel_ms);
 
 		// giant steps
 		int parity = 1;
@@ -1138,6 +1141,8 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k_full);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
 		sclEnqueueKernel(hardware, pd.giantparity);
+//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);
+//		printf("parity 1 giant kernel time %0.2fms\n",kernel_ms);
 
 		parity = 2;
 		ai = 0;
@@ -1147,6 +1152,8 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k_even);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
 		sclEnqueueKernel(hardware, pd.giantparity);
+//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);
+//		printf("parity 2 giant kernel time %0.2fms\n",kernel_ms);
 
 		parity = 3;
 		ai = 0;
@@ -1156,6 +1163,8 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_k_odd);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
 		sclEnqueueKernel(hardware, pd.giantparity);
+//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);
+//		printf("parity 3 giant kernel time %0.2fms\n",kernel_ms);
 
 
 //		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);

@@ -1,8 +1,8 @@
 /*
 
-	giant.cl - Bryan Little 9/2025, montgomery arithmetic by Yves Gallot
+	giant.cl - Bryan Little 2/2026, montgomery arithmetic by Yves Gallot
 
-	the giant steps of the BSGS algorithm
+	the baby-step-giant-step algorithm in local memory
 
 */
 
@@ -13,7 +13,7 @@ typedef struct {
 } factor;
 
 typedef struct {
-	ulong hash;
+	ulong val;
 	int idx;
 } hash_entry;
 
@@ -23,39 +23,29 @@ typedef struct {
 	int kidx;
 } kdata;
 
-// finalization mix step used in MurmurHash3 128-bit to avalanche the bits and produce a well-distributed hash output
-ulong fmix64(ulong k) {
-    k ^= k >> 33;
-    k *= 0xff51afd7ed558ccdUL;
-    k ^= k >> 33;
-    k *= 0xc4ceb9fe1a85ec53UL;
-    k ^= k >> 33;
-    return k;
-}
 
 // Simple hash insert (linear probing, power-of-2 sized table)
 void hash_insert(__local hash_entry *table, ulong val, int idx){
-    ulong hashed = fmix64(val);
-    uint pos = hashed & MASK;
-    for(;;){
-        // Slot looks free → try to claim it
-        if(atomic_cmpxchg( (volatile __local int *)&table[pos].idx, -1, idx) == -1){
-            // We successfully claimed the slot
-            table[pos].hash = hashed;
-            return;
-        }
-        // Lost the race → keep probing
-        pos = (pos + 1) & MASK;
-    }
+	uint pos = val & MASK;
+	while(true){
+		// Slot looks free, try to claim it
+		if(atomic_cmpxchg( (volatile __local int *)&table[pos].idx, -1, idx) == -1){
+			// We successfully claimed the slot
+			table[pos].val = val;
+			return;
+		}
+		// Lost the race. keep probing
+		pos = (pos + 1) & MASK;
+	}
 }
+
 
 // Hash lookup
 int hash_lookup(__local const hash_entry *table, ulong val, int *idx_out) {
-	ulong hashed = fmix64(val);
-	uint pos = hashed & MASK;
+	uint pos = val & MASK;
 	uint start = pos;
 	while(table[pos].idx != -1) {		// used
-		if(table[pos].hash == hashed) {
+		if(table[pos].val == val) {
 			*idx_out = table[pos].idx;
 			return 1;
 		}
@@ -65,12 +55,14 @@ int hash_lookup(__local const hash_entry *table, ulong val, int *idx_out) {
 	return 0;
 }
 
+
 ulong add(ulong a, ulong b, ulong p){
 	ulong r;
 	ulong c = (a >= p - b) ? p : 0;
 	r = a + b - c;
 	return r;
 }
+
 
 ulong m_mul(ulong a, ulong b, ulong p, ulong q){
 	ulong lo = a*b;
@@ -101,7 +93,9 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 
 
 // left to right powmod 2^exp mod P, with 32 bit exponent
-ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
+ulong pow2modsm(ulong two, uint exp, ulong p, ulong q, ulong one) {
+	if(!exp)return one;
+	if(exp==1)return two;
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
 	ulong a = two;
@@ -147,22 +141,21 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-	// copy k list to local cache
-	if(lid<numk){
-		l_k[lid] = g_k[koffset+lid];
-	}
-
-	// baby steps, with local mem atomic inserts
+	// do the baby steps, with local mem atomic inserts
 #if BASE == 2
-	ulong gj = pow2modsm(prime.s3, nstart+threadj, prime.s0, prime.s1);
+	ulong gj = pow2modsm(prime.s3, nstart+threadj, prime.s0, prime.s1, prime.s2);
 #else
 	ulong gj = powmodsm(prime.s3, nstart+threadj, prime.s0, prime.s1, prime.s2);
 #endif
- 
-	for(; threadj < theQ; threadj+=threadInc) {
+ 	for(; threadj < theQ; threadj+=threadInc) {
 		hash_insert(l_htable, gj, threadj);
 		// gj * gj_inc mod P
 		gj = m_mul(gj, prime.s4, prime.s0, prime.s1);
+	}
+
+	// copy k list to local cache
+	if(lid<numk){
+		l_k[lid] = g_k[koffset+lid];
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
