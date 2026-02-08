@@ -13,24 +13,19 @@ typedef struct {
 } factor;
 
 typedef struct {
-	ulong val;
-	int idx;
-} hash_entry;
-
-typedef struct {
 	ulong hadj;
 	int parity;
 	int kidx;
 } kdata;
 
 // Simple hash insert (linear probing, power-of-2 sized table)
-void hash_insert(__local hash_entry *table, ulong val, int idx){
+void hash_insert(__local ulong *htable, __local int *hidx, ulong val, int idx){
 	uint pos = val & MASK;
 	while(true){
 		// Slot looks free, try to claim it
-		if(atomic_cmpxchg( (volatile __local int *)&table[pos].idx, -1, idx) == -1){
+		if(atomic_cmpxchg( (volatile __local int *)&hidx[pos], -1, idx) == -1){
 			// We successfully claimed the slot
-			table[pos].val = val;
+			htable[pos] = val;
 			return;
 		}
 		// Lost the race. keep probing
@@ -38,17 +33,16 @@ void hash_insert(__local hash_entry *table, ulong val, int idx){
 	}
 }
 
-// Hash lookup
-int hash_lookup(__local const hash_entry *table, ulong val, int *idx_out) {
+int hash_lookup(__local const ulong *htable, __local const int *hidx, ulong val, int *idx_out) {
 	uint pos = val & MASK;
 	uint start = pos;
-	while(table[pos].idx != -1) {		// used
-		if(table[pos].val == val) {
-			*idx_out = table[pos].idx;
+	while(hidx[pos] != -1) {		// used
+		if(htable[pos] == val) {
+			*idx_out = hidx[pos];
 			return 1;
 		}
-		pos = (pos + 1) & MASK;            	// wrap around with MASK
-		if(pos == start) break;           	// full cycle
+		pos = (pos + 1) & MASK;		// wrap around with MASK
+		if(pos == start) break;		// full cycle
 	}
 	return 0;
 }
@@ -130,8 +124,8 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 	// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=kcount_parity
 	const ulong8 prime = g_prime[primepos];
 	const uint koffset = primepos*KCOUNT;
-	__local hash_entry l_htable[HSIZE];
-	__local kdata l_k[KCOUNT];
+	__local ulong l_htable[HSIZE];
+	__local int l_hidx[HSIZE];
 	const int numk = prime.s7;
 	const int nstart = (parity==3) ? NMIN+1 : NMIN;
 	const int theQ = (parity==1) ? Q : QQ;
@@ -141,7 +135,7 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 
 	// zero hash table
 	for(int j=lid; j<HSIZE; j+=ls){
-		l_htable[j].idx = -1;
+		l_hidx[j] = -1;
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -149,14 +143,9 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 	ulong gj = basepowmodsm(prime.s3, nstart+threadj, prime.s0, prime.s1, prime.s2);
 
  	for(; threadj < theQ; threadj+=threadInc) {
-		hash_insert(l_htable, gj, threadj);
+		hash_insert(l_htable, l_hidx, gj, threadj);
 		// gj * gj_inc mod P
 		gj = m_mul(gj, prime.s4, prime.s0, prime.s1);
-	}
-
-	// copy k list to local cache
-	if(lid<numk){
-		l_k[lid] = g_k[koffset+lid];
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -166,13 +155,13 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 	int end = (parity==1) ? M : MM;
 	for(int q=lid; q<end; q+=ls){
 		for(int i=0; i<numk; ++i){
-			ulong gamma = m_mul(l_k[i].hadj, thread_gm_step, prime.s0, prime.s1);
+			ulong gamma = m_mul(g_k[i+koffset].hadj, thread_gm_step, prime.s0, prime.s1);
 			int r;
-			if(hash_lookup(l_htable, gamma, &r)) {
+			if(hash_lookup(l_htable, l_hidx, gamma, &r)) {
 				int n = nstart + q*theQ + r;
 				if(n <= NMAX) {
 					uint f = atomic_inc(&g_primecount[2]);
-					factor fac = {prime.s0, n, klist[l_k[i].kidx]};
+					factor fac = {prime.s0, n, klist[g_k[i+koffset].kidx]};
 					g_factor[f] = fac;
 				}
 			}
