@@ -4,6 +4,13 @@ typedef struct {
 	int kidx;
 } kdata;
 
+ulong add(ulong a, ulong b, ulong p){
+	ulong r;
+	ulong c = (a >= p - b) ? p : 0;
+	r = a + b - c;
+	return r;
+}
+
 ulong m_mul(ulong a, ulong b, ulong p, ulong q){
 	ulong lo = a*b;
 	ulong hi = mul_hi(a,b);
@@ -14,9 +21,7 @@ ulong m_mul(ulong a, ulong b, ulong p, ulong q){
 }
 
 // left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
-	if(!exp)return one;
-	if(exp==1)return mbase;
+ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q) {
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
 	ulong a = mbase;
@@ -30,15 +35,26 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 	return a;
 }
 
-// left to right powmod 2^exp mod P, with 32 bit exponent
-ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
+// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
+ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q) {
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
-	ulong a = two;
-	while( curBit ){
-		a = m_mul(a, a, p, q);
+	ulong a = mbase;
+	while( curBit )	{
+		a = m_mul(a,a,p,q);
 		if(exp & curBit){
-			a = add(a, a, p);	// base 2 we can add
+#if BASE == 2
+			a = add(a, a, p);	// a * 2
+#elif BASE == 3
+			ulong b = add(a, a, p);
+			a = add(a, b, p);	// a * 3
+#elif BASE == 5
+			ulong b = add(a, a, p);
+			b = add(b, b, p);
+			a = add(a, b, p);	// a * 5
+#elif BASE > 5
+			a = m_mul(a,mbase,p,q);	// a * BASE
+#endif
 		}
 		curBit >>= 1;
 	}
@@ -107,21 +123,13 @@ __kernel void sort(	__global uint * g_primecount,
 
 	if(ke || ko){
 		gQQ_inv = m_mul(prime.s5, prime.s5, prime.s0, prime.s1);
-		gQQ_step_inc = powmodsm(gQQ_inv, 1024, prime.s0, prime.s1, prime.s2);
-#if BASE == 2
-		gjj_inc = pow2modsm(prime.s3, 2048, prime.s0, prime.s1);
-#else
-		gjj_inc = powmodsm(prime.s3, 2048, prime.s0, prime.s1, prime.s2);
-#endif
+		gQQ_step_inc = powmodsm(gQQ_inv, 1024, prime.s0, prime.s1);
+		gjj_inc = basepowmodsm(prime.s3, 2048, prime.s0, prime.s1);
 	}
 
 	if(kf){
-		ulong gQ_step_inc = powmodsm(prime.s5, 1024, prime.s0, prime.s1, prime.s2);
-#if BASE == 2
-		ulong gj_inc = pow2modsm(prime.s3, 1024, prime.s0, prime.s1);
-#else
-		ulong gj_inc = powmodsm(prime.s3, 1024, prime.s0, prime.s1, prime.s2);
-#endif
+		ulong gQ_step_inc = powmodsm(prime.s5, 1024, prime.s0, prime.s1);
+		ulong gj_inc = basepowmodsm(prime.s3, 1024, prime.s0, prime.s1);
 		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=kcount_full
 		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gj_inc, prime.s5, gQ_step_inc, kf);
 	}

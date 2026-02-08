@@ -16,6 +16,7 @@
 
 #include <unistd.h>
 #include <getopt.h>
+#include <cinttypes>
 
 #include "boinc_api.h"
 #include "boinc_opencl.h"
@@ -274,7 +275,8 @@ int main(int argc, char *argv[])
  	char device_vend[1024];
  	char device_driver[1024];
 	cl_uint CUs;
-	cl_ulong maxMemAllocSize;
+	cl_ulong maxMemAllocSize = 0;
+	cl_ulong LMS = 0;
 
 	err = clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(device_name), &device_name, NULL);
 	if (err != CL_SUCCESS) {
@@ -296,6 +298,11 @@ int main(int argc, char *argv[])
 		printf( "clGetDeviceInfo failed with %d\n", err );
 		exit(EXIT_FAILURE);
 	}
+	err = clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(cl_ulong), &LMS, NULL);
+	if (err != CL_SUCCESS) {
+		printf( "clGetDeviceInfo failed with %d\n", err );
+		exit(EXIT_FAILURE);
+	}
 	err = clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong), &maxMemAllocSize, NULL);
 	if (err != CL_SUCCESS) {
 		printf( "clGetDeviceInfo failed with %d\n", err );
@@ -307,6 +314,8 @@ int main(int argc, char *argv[])
 	if(boinc_is_standalone()){
 		printf("GPU Info:\n  Name: \t\t%s\n  Vendor: \t\t%s\n  Driver: \t\t%s\n  Compute Units: \t%u\n", device_name, device_vend, device_driver, CUs);
 	}
+
+	printf("device local memory size is %" PRIu64 " bytes\n",LMS);
 
 	// check vendor and normalize compute units
 	// kernel size will be determined by profiling so this doesn't have to be accurate.

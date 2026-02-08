@@ -23,7 +23,6 @@ typedef struct {
 	int kidx;
 } kdata;
 
-
 // Simple hash insert (linear probing, power-of-2 sized table)
 void hash_insert(__local hash_entry *table, ulong val, int idx){
 	uint pos = val & MASK;
@@ -38,7 +37,6 @@ void hash_insert(__local hash_entry *table, ulong val, int idx){
 		pos = (pos + 1) & MASK;
 	}
 }
-
 
 // Hash lookup
 int hash_lookup(__local const hash_entry *table, ulong val, int *idx_out) {
@@ -55,14 +53,12 @@ int hash_lookup(__local const hash_entry *table, ulong val, int *idx_out) {
 	return 0;
 }
 
-
 ulong add(ulong a, ulong b, ulong p){
 	ulong r;
 	ulong c = (a >= p - b) ? p : 0;
 	r = a + b - c;
 	return r;
 }
-
 
 ulong m_mul(ulong a, ulong b, ulong p, ulong q){
 	ulong lo = a*b;
@@ -72,7 +68,6 @@ ulong m_mul(ulong a, ulong b, ulong p, ulong q){
 	ulong r = hi - mp;
 	return ( hi < mp ) ? r + p : r;
 }
-
 
 // left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
 ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
@@ -91,24 +86,33 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 	return a;
 }
 
-
-// left to right powmod 2^exp mod P, with 32 bit exponent
-ulong pow2modsm(ulong two, uint exp, ulong p, ulong q, ulong one) {
+// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
+ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 	if(!exp)return one;
-	if(exp==1)return two;
+	if(exp==1)return mbase;
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
-	ulong a = two;
-	while( curBit ){
-		a = m_mul(a, a, p, q);
+	ulong a = mbase;
+	while( curBit )	{
+		a = m_mul(a,a,p,q);
 		if(exp & curBit){
-			a = add(a, a, p);	// base 2 we can add
+#if BASE == 2
+			a = add(a, a, p);	// a * 2
+#elif BASE == 3
+			ulong b = add(a, a, p);
+			a = add(a, b, p);	// a * 3
+#elif BASE == 5
+			ulong b = add(a, a, p);
+			b = add(b, b, p);
+			a = add(a, b, p);	// a * 5
+#elif BASE > 5
+			a = m_mul(a,mbase,p,q);	// a * BASE
+#endif
 		}
 		curBit >>= 1;
 	}
 	return a;
 }
-
 
 __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 				__global uint * g_primecount,
@@ -142,11 +146,8 @@ __kernel __attribute__ ((reqd_work_group_size(1024, 1, 1))) void giantparity(
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// do the baby steps, with local mem atomic inserts
-#if BASE == 2
-	ulong gj = pow2modsm(prime.s3, nstart+threadj, prime.s0, prime.s1, prime.s2);
-#else
-	ulong gj = powmodsm(prime.s3, nstart+threadj, prime.s0, prime.s1, prime.s2);
-#endif
+	ulong gj = basepowmodsm(prime.s3, nstart+threadj, prime.s0, prime.s1, prime.s2);
+
  	for(; threadj < theQ; threadj+=threadInc) {
 		hash_insert(l_htable, gj, threadj);
 		// gj * gj_inc mod P

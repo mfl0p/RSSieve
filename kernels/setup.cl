@@ -46,65 +46,65 @@ ulong powmodlg(ulong mbase, ulong exp, ulong p, ulong q) {
 	return a;
 }
 
+// left to right powmod montgomerizedbase^exp mod P, with 64 bit exponent
+ulong basepowmodlg(ulong mbase, ulong exp, ulong p, ulong q) {
+	ulong curBit = 0x8000000000000000;
+	curBit >>= ( clz(exp) + 1 );
+	ulong a = mbase;
+	while( curBit )	{
+		a = m_mul(a,a,p,q);
+		if(exp & curBit){
+#if BASE == 2
+			a = add(a, a, p);	// a * 2
+#elif BASE == 3
+			ulong b = add(a, a, p);
+			a = add(a, b, p);	// a * 3
+#elif BASE == 5
+			ulong b = add(a, a, p);
+			b = add(b, b, p);
+			a = add(a, b, p);	// a * 5
+#elif BASE > 5
+			a = m_mul(a,mbase,p,q);	// a * BASE
+#endif
+		}
+		curBit >>= 1;
+	}
+	return a;
+}
+
 // left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q) {
+ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q) {
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
 	ulong a = mbase;
 	while( curBit )	{
 		a = m_mul(a,a,p,q);
 		if(exp & curBit){
-			a = m_mul(a,mbase,p,q);
+#if BASE == 2
+			a = add(a, a, p);	// a * 2
+#elif BASE == 3
+			ulong b = add(a, a, p);
+			a = add(a, b, p);	// a * 3
+#elif BASE == 5
+			ulong b = add(a, a, p);
+			b = add(b, b, p);
+			a = add(a, b, p);	// a * 5
+#elif BASE > 5
+			a = m_mul(a,mbase,p,q);	// a * BASE
+#endif
 		}
 		curBit >>= 1;
 	}
 	return a;
 }
-
-// left to right powmod 2^exp mod P, with 64 bit exponent
-ulong pow2modlg(ulong two, ulong exp, ulong p, ulong q) {
-	ulong curBit = 0x8000000000000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = two;
-	while( curBit ){
-		a = m_mul(a, a, p, q);
-		if(exp & curBit){
-			a = add(a, a, p);	// base 2 we can add
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// left to right powmod 2^exp mod P, with 32 bit exponent
-ulong pow2modsm(ulong two, uint exp, ulong p, ulong q) {
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = two;
-	while( curBit ){
-		a = m_mul(a, a, p, q);
-		if(exp & curBit){
-			a = add(a, a, p);	// base 2 we can add
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
 
 int good_pr(ulong8 prime, ulong exponent){
-	ulong rg;
-#if BASE == 2
-	rg = pow2modlg(prime.s3, exponent, prime.s0, prime.s1);
-#else
-	rg = powmodlg(prime.s3, exponent, prime.s0, prime.s1);
-#endif
+	ulong rg = basepowmodlg(prime.s3, exponent, prime.s0, prime.s1);
 	if(rg == prime.s2){
 		return 1;	// test is valid for this P
 	}
 	return 0;
 }
-
 
 // setup for power residue tests
 // literal division will be converted to something faster by the compiler
@@ -139,16 +139,11 @@ int setup_pr(ulong8 prime, ulong pmo, ulong *expo, int *resg){
 
 	// always generate for quadratic test
 	expo[12] = pm>>1;
-#if BASE == 2
-	ulong rg = pow2modlg(prime.s3, expo[12], prime.s0, prime.s1);
-#else
-	ulong rg = powmodlg(prime.s3, expo[12], prime.s0, prime.s1);
-#endif
+	ulong rg = basepowmodlg(prime.s3, expo[12], prime.s0, prime.s1);
 	*resg = (rg == prime.s2) - (rg == pmo);
 
 	return r;
 }
-
 
 // prefilter check for solvability
 int prefilter(ulong hk_inv, ulong p, ulong q, ulong one, ulong pmo, ulong *power, int powcnt, int rg) {
@@ -229,11 +224,7 @@ __kernel void setup(	__global ulong8 * g_prime,
 	ulong mk[KCOUNT+1];
 	ulong prefix[KCOUNT+1];
 
-#if BASE == 2
-	ulong gQ = pow2modsm(prime.s3, Q, prime.s0, prime.s1);
-#else
-	ulong gQ = powmodsm(prime.s3, Q, prime.s0, prime.s1);
-#endif
+	ulong gQ = basepowmodsm(prime.s3, Q, prime.s0, prime.s1);
 
 	mk[KCOUNT] = gQ;	// use last index for gQ_inverse
 
