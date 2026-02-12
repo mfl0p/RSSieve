@@ -1,8 +1,23 @@
+/*
+
+	sort.cl - Bryan Little 2/2026, montgomery arithmetic by Yves Gallot
+
+	sort parity/non parity k to be tested by the BSGS kernels
+
+	setup constants for BSGS kernels
+
+*/
+
 typedef struct {
 	ulong hadj;
 	int parity;
 	int kidx;
 } kdata;
+
+typedef struct {
+	ulong hadj;
+	int kidx;
+} kparity;
 
 ulong add(ulong a, ulong b, ulong p){
 	ulong r;
@@ -36,7 +51,9 @@ ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q) {
 }
 
 // left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q) {
+ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
+	if(!exp)return one;
+	if(exp==1)return mbase;
 	uint curBit = 0x80000000;
 	curBit >>= ( clz(exp) + 1 );
 	ulong a = mbase;
@@ -67,9 +84,12 @@ __kernel void sort(	__global uint * g_primecount,
 			__global ulong8 * g_prime_even,
 			__global ulong8 * g_prime_odd,
 			__global const kdata * g_k,
-			__global kdata * g_k_full,
-			__global kdata * g_k_even,
-			__global kdata * g_k_odd ) {
+			__global kparity * g_k_full,
+			__global kparity * g_k_even,
+			__global kparity * g_k_odd,
+			__global int * g_kcount_full,
+			__global int * g_kcount_even,
+			__global int * g_kcount_odd ) {
 
 	const uint gid = get_global_id(0);
 	const uint pcnt = g_primecount[0]; 
@@ -98,7 +118,8 @@ __kernel void sort(	__global uint * g_primecount,
 				primepos_full = atomic_inc(&g_primecount[20]);
 				kpos_full = primepos_full*KCOUNT;
 			}
-			g_k_full[kpos_full++] = thek;
+			kparity kout = {thek.hadj, thek.kidx};
+			g_k_full[kpos_full++] = kout;
 			++kf;
 		}
 		else if(thek.parity==2){
@@ -106,7 +127,8 @@ __kernel void sort(	__global uint * g_primecount,
 				primepos_even = atomic_inc(&g_primecount[21]);
 				kpos_even = primepos_even*KCOUNT;
 			}
-			g_k_even[kpos_even++] = thek;
+			kparity kout = {thek.hadj, thek.kidx};
+			g_k_even[kpos_even++] = kout;
 			++ke;
 		}
 		else if(thek.parity==3){
@@ -114,33 +136,35 @@ __kernel void sort(	__global uint * g_primecount,
 				primepos_odd = atomic_inc(&g_primecount[22]);
 				kpos_odd = primepos_odd*KCOUNT;
 			}
-			g_k_odd[kpos_odd++] = thek;
+			kparity kout = {thek.hadj, thek.kidx};
+			g_k_odd[kpos_odd++] = kout;
 			++ko;
 		}
 	}
 
-	ulong gQQ_inv, gQQ_step_inc, gjj_inc;
+	ulong gj_start = basepowmodsm(prime.s3, NMIN, prime.s0, prime.s1, prime.s2);	// base^NMIN, NMIN is even
+	ulong gj_inc = basepowmodsm(prime.s3, LS, prime.s0, prime.s1, prime.s2);	// base^(localsize of giant kernel)
+	ulong gjj_inc = m_mul(gj_inc, gj_inc, prime.s0, prime.s1);			// base^(localsize of giant kernel * 2)
+	ulong gQ_step_inc = powmodsm(prime.s5, LS, prime.s0, prime.s1);			// gQ_inv^(localsize of giant kernel)
+	ulong gQQ_inv = m_mul(prime.s5, prime.s5, prime.s0, prime.s1);			// gQ_inv * gQ_inv
+	ulong gQQ_step_inc = m_mul(gQ_step_inc, gQ_step_inc, prime.s0, prime.s1);	// gQQ_inv^(localsize of giant kernel)
 
-	if(ke || ko){
-		gQQ_inv = m_mul(prime.s5, prime.s5, prime.s0, prime.s1);
-		gQQ_step_inc = powmodsm(gQQ_inv, 1024, prime.s0, prime.s1);
-		gjj_inc = basepowmodsm(prime.s3, 2048, prime.s0, prime.s1);
-	}
-
+	// full range
 	if(kf){
-		ulong gQ_step_inc = powmodsm(prime.s5, 1024, prime.s0, prime.s1);
-		ulong gj_inc = basepowmodsm(prime.s3, 1024, prime.s0, prime.s1);
-		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=kcount_full
-		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gj_inc, prime.s5, gQ_step_inc, kf);
+		// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=gj_start
+		g_prime_full[primepos_full] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gj_inc, prime.s5, gQ_step_inc, gj_start);
+		g_kcount_full[primepos_full] = kf;
 	}
-
+	// parity restricted even
 	if(ke){
-		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gjj_inc, .s5=gQQ_inv, .s6=gQQ_step_inc, .s7=kcount_even
-		g_prime_even[primepos_even] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gjj_inc, gQQ_inv, gQQ_step_inc, ke);
+		// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gjj_inc, .s5=gQQ_inv, .s6=gQQ_step_inc, .s7=gj_start
+		g_prime_even[primepos_even] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gjj_inc, gQQ_inv, gQQ_step_inc, gj_start);
+		g_kcount_even[primepos_even] = ke;
 	}
-
+	// parity restricted odd
 	if(ko){
-		// .s0=p, .s1=q, .s2=one, .s3=two/montgomerized base, .s4=gjj_inc, .s5=gQQ_inv, .s6=gQQ_step_inc, .s7=kcount_odd
-		g_prime_odd[primepos_odd] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gjj_inc, gQQ_inv, gQQ_step_inc, ko);
+		// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gjj_inc, .s5=gQQ_inv, .s6=gQQ_step_inc, .s7=gj_start
+		g_prime_odd[primepos_odd] = (ulong8)(prime.s0, prime.s1, prime.s2, prime.s3, gjj_inc, gQQ_inv, gQQ_step_inc, gj_start);
+		g_kcount_odd[primepos_odd] = ko;
 	}
 }

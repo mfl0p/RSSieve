@@ -2,7 +2,9 @@
 
 	setup.cl - Bryan Little 2/2026, montgomery arithmetic by Yves Gallot
 
-	setup for testing each sieve prime
+	setup for testing each sieve prime and k
+
+	perform power residue testing to eliminate k that have no solutions for this prime
 
 */
 

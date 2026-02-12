@@ -13,12 +13,17 @@ typedef struct {
 } kdata;
 
 typedef struct {
+	cl_ulong hadj;
+	cl_int kidx;
+} kparity;
+
+typedef struct {
 	uint64_t pmin, pmax, p, checksum, primecount, factorcount, last_trickle, state_sum;
 	uint32_t nmin, nmax, base;
 } workStatus;
 
 typedef struct {
-	uint64_t maxmalloc, numhash;
+	uint64_t numhash;
 	uint32_t computeunits, nstep, sstep, powcount, prodcount, scount, numresults, range, psize, numgroups, nlimit;
 	int32_t kcount, L, m, hsize;
 	bool test, compute, write_state_a_next;
@@ -30,7 +35,8 @@ typedef struct {
 	cl_mem d_primes, d_primes_full, d_primes_even, d_primes_odd;
 	cl_mem d_primecount;
 	cl_mem d_k, d_k_full, d_k_even, d_k_odd;
-	sclSoft setup, sort, clearn, clearresult, getsegprimes, addsmallprimes, giantparity;
+	cl_mem d_kcount_full, d_kcount_even, d_kcount_odd;
+	sclSoft setup, sort, clearn, clearresult, getsegprimes, addsmallprimes, giantparity, giantfull;
 } progData;
 
 void cl_sieve( sclHard hardware, workStatus & st, searchData & sd );
