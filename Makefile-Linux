@@ -5,14 +5,14 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 0
-VERSION_MINOR := 9
+VERSION_MINOR := 11
 date := $(shell date +%Y%m%d)
 
 APP = RSSieve-linux64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date)
 
-SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/sort.cl kernels/giant.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl putil.c putil.h verify_factor.c verify_factor.h
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h inputfile.c kernels/sort.cl kernels/giant.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl verify_factor.c verify_factor.h
 KERNEL_HEADERS = kernels/sort.h kernels/giant.h kernels/clearn.h kernels/clearresult.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h
-OBJ = main.o cl_sieve.o simpleCL.o putil.o verify_factor.o
+OBJ = main.o cl_sieve.o simpleCL.o verify_factor.o inputfile.o
 
 OCL_INC = -I /usr/local/cuda/include/CL/
 OCL_LIB = -L . -L /usr/local/cuda-10.1/targets/x86_64-linux/lib -lOpenCL
@@ -38,11 +38,11 @@ cl_sieve.o : $(SRC) $(KERNEL_HEADERS)
 simpleCL.o : $(SRC)
 	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ simpleCL.c
 
-putil.o : $(SRC)
-	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ putil.c
-
 verifyprime.o : $(SRC)
 	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ verifyprime.cpp
+
+inputfile.o : $(SRC)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ inputfile.c
 
 .cl.h:
 	./cltoh.pl $< > $@

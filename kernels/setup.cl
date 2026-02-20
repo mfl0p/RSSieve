@@ -297,11 +297,11 @@ __kernel void setup(	__global ulong8 * g_prime,
 
 	// we can skip this p if all k have no solutions
 	if(count[0] == KCOUNT){
-		atomic_inc(&g_primecount[3]);
+//		atomic_inc(&g_primecount[3]);
 		g_prime[gid].s0 = 0;
 		return;
 	}
-
+/*
 	// counters for testing
 	if(count[0]){		// skipped
 		atomic_add(&g_primecount[5],count[0]);
@@ -315,7 +315,7 @@ __kernel void setup(	__global ulong8 * g_prime,
 	if(count[3]){		// odd
 		atomic_add(&g_primecount[8],count[3]);
 	}
-
+*/
 }
 
 

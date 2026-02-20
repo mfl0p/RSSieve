@@ -433,7 +433,7 @@ void _sclBuildProgram( cl_program program, cl_device_id devices, const char* pNa
 	
 	err = clBuildProgram( program, 0, NULL, options, NULL, NULL );
 
-	// print nvidia kernel buld log
+	// print nvidia kernel build log
 //	err = clBuildProgram( program, 0, NULL, "-cl-nv-verbose", NULL, NULL );
 //	clGetProgramBuildInfo( program, devices, CL_PROGRAM_BUILD_LOG, 4096, build_c, NULL );
 //	printf( "Build Log for %s_program:\n%s\n", pName, build_c );
