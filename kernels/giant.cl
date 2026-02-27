@@ -126,6 +126,47 @@ ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 	return a;
 }
 
+// dual powmod, base^lid and gQ_inv^lid
+// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
+void dualbasepowmodsm(ulong mbase1, ulong mbase2, uint exp, ulong p, ulong q, ulong one, ulong *res1, ulong *res2) {
+	if(!exp){
+		*res1 = one;
+		*res2 = one;
+		return;
+	}
+	if(exp==1){
+		*res1 = mbase1;
+		*res2 = mbase2;
+		return;
+	}
+	uint curBit = 0x80000000;
+	curBit >>= ( clz(exp) + 1 );
+	ulong a1 = mbase1;
+	ulong a2 = mbase2;
+	while( curBit )	{
+		a1 = m_mul(a1,a1,p,q);
+		a2 = m_mul(a2,a2,p,q);
+		if(exp & curBit){
+#if BASE == 2
+			a1 = add(a1, a1, p);		// a*2
+#elif BASE == 3
+			ulong b1 = add(a1, a1, p);
+			a1 = add(a1, b1, p);		// a*3
+#elif BASE == 5
+			ulong b1 = add(a1, a1, p);
+			b1 = add(b1, b1, p);
+			a1 = add(a1, b1, p);		// a*5
+#elif BASE > 5
+			a1 = m_mul(a1,mbase1,p,q);	// a*BASE
+#endif
+			a2 = m_mul(a2,mbase2,p,q);
+		}
+		curBit >>= 1;
+	}
+	*res1 = a1;
+	*res2 = a2;
+}
+
 __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global uint * g_primecount,
 				__global factor * g_factor,
@@ -133,18 +174,17 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global const kparity * g_k,
 				__global const int * g_kcount,
 				__global ulong * g_htable,
-				__global int * g_hidx ) {
+				__global int * g_hidx,
+				const uint start ) {
 
-	const uint gid = get_global_id(0);
-	const uint pcnt = g_primecount[20];
-	const int primepos = get_group_id(0);
+	const int group = get_group_id(0);
+	const int primepos = start + group;
 	const int lid = get_local_id(0);
 	const int ls = get_local_size(0);
-	if(primepos >= pcnt) return;
 	// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=gj_start
 	const ulong8 prime = g_prime[primepos];
 	const uint koffset = primepos*KCOUNT;
-	const uint hashoffset = primepos*HSIZE;
+	const uint hashoffset = group*HSIZE;
 	__local uint l_htable[HSIZE];
 	__local ulong l_k_hadj[KCOUNT];
 	const int numk = g_kcount[primepos];
@@ -155,10 +195,11 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-	// do the baby steps, with local mem atomic inserts
-	ulong gj = basepowmodsm(prime.s3, lid, prime.s0, prime.s1, prime.s2);
+	ulong gj, thread_gm_step;
+	dualbasepowmodsm(prime.s3, prime.s5, lid, prime.s0, prime.s1, prime.s2, &gj, &thread_gm_step);
 	gj = m_mul(prime.s7, gj, prime.s0, prime.s1); // base^NMIN * base^lid 
 
+	// do the baby steps, with local mem atomic inserts
  	for(int j=lid; j<Q; j+=ls) {
 		hash_insert(g_htable, g_hidx, gj, j, hashoffset, l_htable);
 		// gj * gj_inc mod P
@@ -170,8 +211,6 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 		l_k_hadj[lid] = g_k[lid + koffset].hadj;
 	}
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
-
-	ulong thread_gm_step = powmodsm(prime.s5, lid, prime.s0, prime.s1, prime.s2);
 
 	// giant steps
 	for(int q=lid; q<M; q+=ls){
@@ -199,18 +238,17 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 				__global const int * g_kcount,
 				__global ulong * g_htable,
 				__global int * g_hidx,
-				const int parity ) {
+				const int parity,
+				const int start ) {
 
-	const uint gid = get_global_id(0);
-	const uint pcnt = (parity==2) ? g_primecount[21] : g_primecount[22];
-	const int primepos = get_group_id(0);
+	const int group = get_group_id(0);
+	const int primepos = start + group;
 	const int lid = get_local_id(0);
 	const int ls = get_local_size(0);
-	if(primepos >= pcnt) return;
 	// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=gj_start
 	const ulong8 prime = g_prime[primepos];
 	const uint koffset = primepos*KCOUNT;
-	const uint hashoffset = primepos*HSIZE;
+	const uint hashoffset = group*HSIZE;
 	__local uint l_htable[HSIZE];
 	__local ulong l_k_hadj[KCOUNT];
 	const int numk = g_kcount[primepos];

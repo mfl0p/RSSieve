@@ -147,27 +147,6 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
     }
 }
 
-
-
-#ifdef _WIN32
-double getSysOpType()
-{
-    double ret = 0.0;
-    NTSTATUS(WINAPI *RtlGetVersion)(LPOSVERSIONINFOEXW);
-    OSVERSIONINFOEXW osInfo;
-
-    *(FARPROC*)&RtlGetVersion = GetProcAddress(GetModuleHandleA("ntdll"), "RtlGetVersion");
-
-    if (NULL != RtlGetVersion)
-    {
-        osInfo.dwOSVersionInfoSize = sizeof(osInfo);
-        RtlGetVersion(&osInfo);
-        ret = (double)osInfo.dwMajorVersion;
-    }
-    return ret;
-}
-#endif
-
 /* Join argc/argv into a single string with spaces */
 char* join_argv(int argc, char *argv[])
 {
@@ -196,7 +175,7 @@ int main(int argc, char *argv[])
 { 
 	sclHard hardware = {};
 	searchData sd = {};
-	sd.numresults = 100000000;
+	sd.numresults = 10000000;
 	sd.write_state_a_next = true;
 	workStatus st = {};
 
@@ -328,6 +307,8 @@ int main(int argc, char *argv[])
 	}
 
 	sd.computeunits = (uint32_t)CUs;
+	sd.lmemsize = (uint32_t)LMS;
+
 	char intel_s[] = "Intel";
 	char arc_s[] = "Arc";
 	char nvidia_s[] = "NVIDIA";	

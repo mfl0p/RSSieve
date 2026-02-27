@@ -33,9 +33,9 @@ typedef struct {
 } workStatus;
 
 typedef struct {
-	uint32_t computeunits, numresults, range, psize, numgroups, Q, m, QQ, mm, hsize;
+	uint32_t computeunits, numresults, range, psize, Q, m, QQ, mm, hsize, lmemsize, primes_per_bsgs;
 	int32_t kcount;
-	bool test, compute, write_state_a_next, nvidia;
+	bool test, write_state_a_next, nvidia;
 	Sequence sequences[MAX_SEQUENCES];
 	int klist[MAX_SEQUENCES];
 	const char *input_file;
@@ -48,6 +48,7 @@ typedef struct {
 	cl_mem d_primecount;
 	cl_mem d_k, d_k_full, d_k_even, d_k_odd;
 	cl_mem d_kcount_full, d_kcount_even, d_kcount_odd;
+	cl_mem d_bsgs_count;
 	sclSoft setup, sort, clearn, clearresult, getsegprimes, addsmallprimes, giantparity, giantfull;
 } progData;
 

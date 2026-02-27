@@ -7,13 +7,9 @@
 */
 
 
-__kernel void clearresult(__global uint *g_primecount, __global ulong *g_sum, const uint numgroups){
+__kernel void clearresult(__global uint *g_primecount, __global ulong *g_sum){
 
 	const uint gid = get_global_id(0);
-
-	if(gid < numgroups){
-		g_sum[gid] = 0;	// index 0 is total primecount between checkpoints.  index 1 to 'numgroups' are for each workgroup's checksum
-	}
 
 	if(gid == 0){
 		g_primecount[1] = 0;	// keep track of largest kernel prime count
@@ -23,7 +19,9 @@ __kernel void clearresult(__global uint *g_primecount, __global ulong *g_sum, co
 		g_primecount[5] = 0;	// 
 		g_primecount[7] = 0;	// 
 		g_primecount[8] = 0;	//
-		g_primecount[11] = 0;	//  
+		g_primecount[11] = 0;	//
+
+		g_sum[0] = 0;		// total primecount between checkpoints  
 	}
 
 }

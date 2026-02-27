@@ -79,6 +79,7 @@ ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
 }
 
 __kernel void sort(	__global uint * g_primecount,
+			__global uint * g_bsgs_count,
 			__global const ulong8 * g_prime,
 			__global ulong8 * g_prime_full,
 			__global ulong8 * g_prime_even,
@@ -115,7 +116,7 @@ __kernel void sort(	__global uint * g_primecount,
 		}
 		else if(thek.parity==1){
 			if(!kf){
-				primepos_full = atomic_inc(&g_primecount[20]);
+				primepos_full = atomic_inc(&g_bsgs_count[0]);
 				kpos_full = primepos_full*KCOUNT;
 			}
 			kparity kout = {thek.hadj, thek.kidx};
@@ -124,7 +125,7 @@ __kernel void sort(	__global uint * g_primecount,
 		}
 		else if(thek.parity==2){
 			if(!ke){
-				primepos_even = atomic_inc(&g_primecount[21]);
+				primepos_even = atomic_inc(&g_bsgs_count[1]);
 				kpos_even = primepos_even*KCOUNT;
 			}
 			kparity kout = {thek.hadj, thek.kidx};
@@ -133,7 +134,7 @@ __kernel void sort(	__global uint * g_primecount,
 		}
 		else if(thek.parity==3){
 			if(!ko){
-				primepos_odd = atomic_inc(&g_primecount[22]);
+				primepos_odd = atomic_inc(&g_bsgs_count[2]);
 				kpos_odd = primepos_odd*KCOUNT;
 			}
 			kparity kout = {thek.hadj, thek.kidx};

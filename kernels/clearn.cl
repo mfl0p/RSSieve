@@ -1,13 +1,13 @@
 /*
 
-	clearn.cl - Bryan Little 6/2024
+	clearn.cl - Bryan Little 2/2026
 
 	Clears prime counter.
 
 */
 
 
-__kernel void clearn(__global uint *primecount){
+__kernel void clearn(__global uint *primecount, __global uint *bsgs_count){
 
 	const uint i = get_global_id(0);
 
@@ -16,9 +16,10 @@ __kernel void clearn(__global uint *primecount){
 		primecount[6]=0;
 		primecount[9]=0;
 		primecount[10]=0;
-		primecount[20]=0;
-		primecount[21]=0;
-		primecount[22]=0;
+
+		bsgs_count[0]=0;
+		bsgs_count[1]=0;
+		bsgs_count[2]=0;
 	}
 
 

@@ -74,6 +74,7 @@ void sclSetGlobalSizeExact( sclSoft & software, uint64_t size );
 void 			sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
 void 			sclWriteNB( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
 void			sclReadNB( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
+cl_event 		sclReadNBEvent( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 void			sclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 
 /* ######################################################## */
