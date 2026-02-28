@@ -226,7 +226,6 @@ int read_state( workStatus & st, searchData & sd ){
 	return 0;
 }
 
-
 void checkpoint( workStatus & st, searchData & sd ){
 	handle_trickle_up( st );
 	write_state( st, sd );
@@ -236,58 +235,91 @@ void checkpoint( workStatus & st, searchData & sd ){
 	boinc_checkpoint_completed();
 }
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+
+static void win_sleep_ns(long long ns)
+{
+    if (ns <= 0) return;
+
+    // Waitable timer uses 100-ns ticks; negative value means relative time.
+    LONGLONG ticks100 = (ns + 99) / 100;   // ceil(ns/100)
+    if (ticks100 < 1) ticks100 = 1;
+
+    LARGE_INTEGER due;
+    due.QuadPart = -ticks100;
+
+    static HANDLE t = NULL;
+    if (!t) {
+        t = CreateWaitableTimer(NULL, TRUE, NULL);
+        if (!t) {
+            // Fallback: yield
+            Sleep(0);
+            return;
+        }
+    }
+
+    if (!SetWaitableTimer(t, &due, 0, NULL, NULL, FALSE)) {
+        Sleep(0);
+        return;
+    }
+
+    WaitForSingleObject(t, INFINITE);
+}
+#endif
 
 // sleep CPU thread while waiting on the specified event to complete in the command queue
-// using critical sections to prevent BOINC from shutting down the program while kernels are running on the GPU
-void waitOnEvent(sclHard hardware, cl_event event){
+// note: this is broken on windows, appears we cannot get less than 1ms sleep time
+void waitOnEvent(sclHard hardware, cl_event event)
+{
+    cl_int err;
+    cl_int info;
 
-	cl_int err;
-	cl_int info;
-#ifdef _WIN32
-#else
-	struct timespec sleep_time;
-	sleep_time.tv_sec = 0;
-//	sleep_time.tv_nsec = 1000000;	// 1ms
-	sleep_time.tv_nsec = 100000;
+#ifndef _WIN32
+    struct timespec sleep_time;
+    sleep_time.tv_sec  = 0;
+    // sleep_time.tv_nsec = 1000000; // 1ms
+    sleep_time.tv_nsec = 100000;    // 0.1ms
 #endif
 
-	boinc_begin_critical_section();
+    boinc_begin_critical_section();
 
-	err = clFlush(hardware.queue);
-	if ( err != CL_SUCCESS ) {
-		printf( "ERROR: clFlush\n" );
-		fprintf(stderr, "ERROR: clFlush\n" );
-		sclPrintErrorFlags( err );
-       	}
+    err = clFlush(hardware.queue);
+    if (err != CL_SUCCESS) {
+        printf("ERROR: clFlush\n");
+        fprintf(stderr, "ERROR: clFlush\n");
+        sclPrintErrorFlags(err);
+    }
 
-	while(true){
+    while (true) {
 
 #ifdef _WIN32
-		Sleep(1);
+        win_sleep_ns(100000);          // 100,000 ns = 0.1 ms
 #else
-		nanosleep(&sleep_time,NULL);
+        nanosleep(&sleep_time, NULL);
 #endif
 
-		err = clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(cl_int), &info, NULL);
-		if ( err != CL_SUCCESS ) {
-			printf( "ERROR: clGetEventInfo\n" );
-			fprintf(stderr, "ERROR: clGetEventInfo\n" );
-			sclPrintErrorFlags( err );
-	       	}
+        err = clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS,
+                             sizeof(cl_int), &info, NULL);
+        if (err != CL_SUCCESS) {
+            printf("ERROR: clGetEventInfo\n");
+            fprintf(stderr, "ERROR: clGetEventInfo\n");
+            sclPrintErrorFlags(err);
+        }
 
-		if(info == CL_COMPLETE){
-			err = clReleaseEvent(event);
-			if ( err != CL_SUCCESS ) {
-				printf( "ERROR: clReleaseEvent\n" );
-				fprintf(stderr, "ERROR: clReleaseEvent\n" );
-				sclPrintErrorFlags( err );
-		       	}
+        if (info == CL_COMPLETE) {
+            err = clReleaseEvent(event);
+            if (err != CL_SUCCESS) {
+                printf("ERROR: clReleaseEvent\n");
+                fprintf(stderr, "ERROR: clReleaseEvent\n");
+                sclPrintErrorFlags(err);
+            }
 
-			boinc_end_critical_section();
-
-			return;
-		}
-	}
+            boinc_end_critical_section();
+            return;
+        }
+    }
 }
 
 
@@ -533,15 +565,8 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 		if(boinc_is_standalone()){
 			printf("Verified %u factors.\n", numfactors-prpcount);
 		}
-		// write factors to file
-		FILE * resfile = my_fopen(RESULTS_FILENAME,"a");
-		if( resfile == NULL ){
-			fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
-			exit(EXIT_FAILURE);
-		}
-		if(boinc_is_standalone()){
-			printf("writing factors to %s\n", RESULTS_FILENAME);
-		}
+
+		FILE * resfile = NULL;
 		for(uint32_t i=0; i<numfactors; ++i){
 			uint64_t fp = h_factor[i].p;
 			uint32_t fn = h_factor[i].n;
@@ -552,20 +577,32 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
  				if( factor_can_be_used(sd.sequences, sd.kcount, fk, sign, fn) ){
 					mark_factor_used(sd.sequences, sd.kcount, fk, sign, fn);
 					++st.factorcount;
+
+					if(resfile == NULL){
+						resfile = my_fopen(RESULTS_FILENAME,"a");
+						if( resfile == NULL ){
+							fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+							exit(EXIT_FAILURE);
+						}
+					}
+
 					if( fprintf( resfile, "%" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc) < 0 ){
 						fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 						exit(EXIT_FAILURE);
 					}
-					// add the factor to checksum
-					st.checksum += fk + fn + fc;
-				}/*
+				}
 				else{
-					fprintf(stderr, "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
-					printf( "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
-				}*/
+					++st.dupcount;
+//					fprintf(stderr, "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
+//					printf( "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
+				}
+				// add the factor to checksum
+				st.checksum += fk + fn + fc;
 			}
 		}
-		fclose(resfile);
+		if(resfile != NULL){
+			fclose(resfile);
+		}
 		free(h_factor);
 	}
 }
@@ -1314,19 +1351,39 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 	finalizeResults(st);
 	boinc_end_critical_section();
 
-	fprintf(stderr,"Sieve complete.\nfactors %" PRIu64 ", prime count %" PRIu64 "\n", st.factorcount, st.primecount);
+	fprintf(stderr,"Sieve complete.\nfactors %" PRIu64 ", prime count %" PRIu64 ", duplicate factors %" PRIu64 "\n", st.factorcount, st.primecount, st.dupcount);
 
 	if(boinc_is_standalone()){
 		time(&totalf);
 		printf("Sieve finished in %d sec.\n", (int)totalf - (int)totals);
-		printf("factors %" PRIu64 ", prime count %" PRIu64 ", checksum %016" PRIX64 "\n", st.factorcount, st.primecount, st.checksum);
+		printf("factors %" PRIu64 ", prime count %" PRIu64 ", checksum %016" PRIX64 ", duplicate factors %" PRIu64 "\n"
+		, st.factorcount, st.primecount, st.checksum, st.dupcount);
 	}
 
-	free(h_count);
-	free(h_primecount);
-	free(h_sum);
+	// free
+	err = clEnqueueUnmapMemObject(hardware.queue, pd.d_primecount, h_primecount, 0, NULL, NULL);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clEnqueueUnmapMemObject failure.\n");
+                printf( "ERROR: clEnqueueUnmapMemObject failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	err = clEnqueueUnmapMemObject(hardware.queue, pd.d_bsgs_count, h_count, 0, NULL, NULL);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clEnqueueUnmapMemObject failure.\n");
+                printf( "ERROR: clEnqueueUnmapMemObject failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	err = clEnqueueUnmapMemObject(hardware.queue, pd.d_sum, h_sum, 0, NULL, NULL);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clEnqueueUnmapMemObject failure.\n");
+                printf( "ERROR: clEnqueueUnmapMemObject failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	clFinish(hardware.queue);
+
+	free_sequences(sd);
 	cleanup(pd, sd, st);
-//	for(int i = 0; i < sd.kcount; i++) free(sd.sequences[i].bitmap);
+
 }
 
 

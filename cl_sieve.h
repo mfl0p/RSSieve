@@ -2,11 +2,9 @@
 #define MAX_SEQUENCES 100
 
 typedef struct {
-    long long K;
-    char sign;
-    long long N0;
-    long long lastN;
     size_t nbits;        // bitmap bits
+    uint32_t K, N0, lastN;
+    char sign;
     uint8_t *bitmap;     // 1 = can be used
 } Sequence;
 
@@ -28,7 +26,7 @@ typedef struct {
 } kparity;
 
 typedef struct {
-	uint64_t pmin, pmax, p, checksum, primecount, factorcount, last_trickle, state_sum;
+	uint64_t pmin, pmax, p, checksum, primecount, factorcount, last_trickle, state_sum, dupcount;
 	uint32_t nmin, nmax, base;
 } workStatus;
 
@@ -58,8 +56,9 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd );
 
 void read_input(workStatus & st, searchData & sd);
 
-int factor_can_be_used(Sequence *sequences, size_t count, long long K, char sign, long long n);
+int factor_can_be_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n);
 
-void mark_factor_used(Sequence *sequences, size_t count, long long K, char sign, long long n);
+void mark_factor_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n);
 
+void free_sequences(searchData &sd);
 
