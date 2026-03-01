@@ -1,0 +1,112 @@
+bryan@db:~/RSSieve/test$ time ./RSSieve-linux64-v0.12-20260227 -p 55277125e9 -P 55277130e9 -i ../sr5.sieveinput
+
+NOTE THIS IS AN INCOMPLETE VERSION!
+
+RSSieve v0.12 by Bryan Little
+with contributions by Geoffrey Reynolds and Yves Gallot
+Compiled Feb 27 2026 with GCC 13.3.0
+-p 55277125e9 -P 55277130e9 -i ../sr5.sieveinput
+init_data.xml not found, using device 0.
+GPU Info:
+  Name: 		NVIDIA GeForce RTX 5090
+  Vendor: 		NVIDIA Corporation
+  Driver: 		580.95.05
+  Compute Units: 	170
+  Local Mem Size: 	49152 bytes
+Sequences read: 79
+Base = 5
+NMIN = 6000000
+NMAX = 24999993
+klist array: -4906 6436 7528 10918 -23906 -26222 26798 31712 -35248 36412 41738 44348 44738 45748 58642 60394 62698 64258 67748 -68132 -71146 71492 74632 -76354 76724 -81134 83936 84284 90056 92906 -92936 93484 -102952 105464 -109238 -109862 126134 -127174 -131848 -134266 139196 -143632 -145462 -145484 -146756 -147844 -151042 -152428 152588 -154844 -159388 -164852 -170386 -170908 -182398 -187916 -189766 -190334 -195872 -201778 -204394 -206894 -231674 -239062 -239342 -246238 -248546 -265702 -267298 -271162 -285598 -285728 -298442 -304004 -313126 -318278 -325922 -335414 -338866 
+Starting sieve at p: 55277125000000000 n: 6000000
+Stopping sieve at P: 55277130000000000 N: 24999993
+Set BSGS local size to 1024
+BSGS kernel local mem used 33408 bytes
+-DHSIZE=8192 -DMASK=8191 -DQ=4096 -DM=4639 -DKCOUNT=79 -DNMIN=6000000 -DNMAX=24999993 -DQQ=8192 -DMM=2320 -DBASE=5 -DLS=1024
+Invalid checkpoint file stateA.ckp !!!
+hash table used 1604 megabytes
+Starting Sieve...
+Sieve Progress: 1.6%
+Sieve Progress: 3.2%
+Sieve Progress: 4.8%
+Sieve Progress: 6.5%
+Sieve Progress: 8.1%
+Sieve Progress: 9.7%
+Sieve Progress: 11.4%
+Sieve Progress: 13.0%
+Sieve Progress: 14.6%
+Sieve Progress: 16.3%
+Sieve Progress: 17.9%
+Sieve Progress: 19.5%
+Sieve Progress: 21.2%
+Sieve Progress: 22.8%
+Sieve Progress: 24.4%
+Sieve Progress: 26.0%
+Sieve Progress: 27.7%
+Sieve Progress: 29.3%
+Sieve Progress: 30.9%
+Sieve Progress: 32.6%
+Sieve Progress: 34.2%
+Sieve Progress: 35.8%
+Sieve Progress: 37.4%
+Sieve Progress: 39.1%
+Sieve Progress: 40.7%
+Sieve Progress: 42.3%
+Sieve Progress: 43.9%
+Sieve Progress: 45.5%
+Sieve Progress: 47.2%
+Sieve Progress: 48.8%
+Sieve Progress: 50.4%
+0.8% primes skipped
+40.5% k skipped
+16.9% k full range n
+21.3% k restricted to even n
+21.3% k restricted to odd n
+processing 1 factors on CPU
+Verifying factors on CPU...
+Verified 1 factors.
+Checkpoint, current p: 55277127519894608
+Sieve Progress: 52.0%
+Sieve Progress: 53.6%
+Sieve Progress: 55.2%
+Sieve Progress: 56.8%
+Sieve Progress: 58.5%
+Sieve Progress: 60.1%
+Sieve Progress: 61.7%
+Sieve Progress: 63.3%
+Sieve Progress: 64.9%
+Sieve Progress: 66.5%
+Sieve Progress: 68.1%
+Sieve Progress: 69.8%
+Sieve Progress: 71.4%
+Sieve Progress: 73.0%
+Sieve Progress: 74.6%
+Sieve Progress: 76.2%
+Sieve Progress: 77.8%
+Sieve Progress: 79.4%
+Sieve Progress: 81.1%
+Sieve Progress: 82.6%
+Sieve Progress: 84.3%
+Sieve Progress: 85.9%
+Sieve Progress: 87.5%
+Sieve Progress: 89.1%
+Sieve Progress: 90.7%
+Sieve Progress: 92.3%
+Sieve Progress: 93.9%
+Sieve Progress: 95.5%
+Sieve Progress: 97.1%
+Sieve Progress: 98.8%
+Sieve Progress: 100.0%
+0.8% primes skipped
+40.5% k skipped
+16.9% k full range n
+21.3% k restricted to even n
+21.3% k restricted to odd n
+processing 2 factors on CPU
+sorting factors
+Verifying factors on CPU...
+Verified 2 factors.
+Checkpoint, current p: 55277130000000000
+Sieve finished in 123 sec.
+factors 1, prime count 129696596, checksum 00000000032EEEA5, duplicate factors 2
+

@@ -235,42 +235,7 @@ void checkpoint( workStatus & st, searchData & sd ){
 	boinc_checkpoint_completed();
 }
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
-static void win_sleep_ns(long long ns)
-{
-    if (ns <= 0) return;
-
-    // Waitable timer uses 100-ns ticks; negative value means relative time.
-    LONGLONG ticks100 = (ns + 99) / 100;   // ceil(ns/100)
-    if (ticks100 < 1) ticks100 = 1;
-
-    LARGE_INTEGER due;
-    due.QuadPart = -ticks100;
-
-    static HANDLE t = NULL;
-    if (!t) {
-        t = CreateWaitableTimer(NULL, TRUE, NULL);
-        if (!t) {
-            // Fallback: yield
-            Sleep(0);
-            return;
-        }
-    }
-
-    if (!SetWaitableTimer(t, &due, 0, NULL, NULL, FALSE)) {
-        Sleep(0);
-        return;
-    }
-
-    WaitForSingleObject(t, INFINITE);
-}
-#endif
-
 // sleep CPU thread while waiting on the specified event to complete in the command queue
-// note: this is broken on windows, appears we cannot get less than 1ms sleep time
 void waitOnEvent(sclHard hardware, cl_event event)
 {
     cl_int err;
@@ -279,8 +244,7 @@ void waitOnEvent(sclHard hardware, cl_event event)
 #ifndef _WIN32
     struct timespec sleep_time;
     sleep_time.tv_sec  = 0;
-    // sleep_time.tv_nsec = 1000000; // 1ms
-    sleep_time.tv_nsec = 100000;    // 0.1ms
+    sleep_time.tv_nsec = 1000000; // 1ms
 #endif
 
     boinc_begin_critical_section();
@@ -295,7 +259,7 @@ void waitOnEvent(sclHard hardware, cl_event event)
     while (true) {
 
 #ifdef _WIN32
-        win_sleep_ns(100000);          // 100,000 ns = 0.1 ms
+	Sleep(1);
 #else
         nanosleep(&sleep_time, NULL);
 #endif
@@ -1183,6 +1147,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 	sclSetKernelArg(pd.sort, ai++, sizeof(cl_mem), &pd.d_kcount_odd);
 	ai = 0;
 	sclSetKernelArg(pd.giantfull, ai++, sizeof(cl_mem), &pd.d_primecount);
+	sclSetKernelArg(pd.giantfull, ai++, sizeof(cl_mem), &pd.d_bsgs_count);
 	sclSetKernelArg(pd.giantfull, ai++, sizeof(cl_mem), &pd.d_factor);
 	sclSetKernelArg(pd.giantfull, ai++, sizeof(cl_mem), &pd.d_primes_full);
 	sclSetKernelArg(pd.giantfull, ai++, sizeof(cl_mem), &pd.d_k_full);
@@ -1267,23 +1232,33 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 //		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.sort);
 //		printf("sort kernel time %0.2fms\n",kernel_ms);
 
-		// get counters for BSGS kernels
-		launchEvent = sclReadNBEvent(hardware, 3*sizeof(uint32_t), pd.d_bsgs_count, h_count);
-		waitOnEvent(hardware, launchEvent);
+		// get counters for BSGS kernels, non blocking
+		cl_event memTransfer = sclReadNBEvent(hardware, 3*sizeof(uint32_t), pd.d_bsgs_count, h_count);
+
+		// hide transfer latency with one bsgs kernel
+		uint32_t ppos_start = 0;
+		uint32_t ppos_end = ppos_start + sd.primes_per_bsgs;
+		uint32_t ppos_range = ppos_end-ppos_start;
+		sclSetKernelArg(pd.giantfull, 8, sizeof(uint32_t), &ppos_start);
+		sclSetGlobalSize(pd.giantfull, ppos_range * pd.giantfull.local_size[0]);	// 1 group per prime
+		sclEnqueueKernel(hardware, pd.giantfull);
+
+		// transfer should be ready
+		waitOnEvent(hardware, memTransfer);
 
 		// 3 different BSGS Kernels, 1 full range, 2 parity restricted
 		// loops limit runtime and device global memory hash table size
 		// parity = 1
-		for(uint32_t ppos_start=0; ppos_start<h_count[0];){
-			uint32_t ppos_end = ppos_start + sd.primes_per_bsgs;
+		for(ppos_start = ppos_end; ppos_start < h_count[0];){
+			ppos_end = ppos_start + sd.primes_per_bsgs;
 			if(ppos_end > h_count[0]) ppos_end = h_count[0];
-			uint32_t ppos_range = ppos_end-ppos_start;
+			ppos_range = ppos_end-ppos_start;
 
-			sclSetKernelArg(pd.giantfull, 7, sizeof(uint32_t), &ppos_start);
+			sclSetKernelArg(pd.giantfull, 8, sizeof(uint32_t), &ppos_start);
 			sclSetGlobalSize( pd.giantfull, ppos_range * pd.giantfull.local_size[0] );	// 1 group per prime
 			sclEnqueueKernel(hardware, pd.giantfull);
-	//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantfull);
-	//		printf("parity 1 giant kernel time %0.2fms\n",kernel_ms);
+//			double kernel_ns = ProfilesclEnqueueKernelNS(hardware, pd.giantfull);
+//			printf("parity 1 giant kernel time %0.2f ns\n",kernel_ns);
 
 			ppos_start = ppos_end;
 		}
@@ -1298,10 +1273,10 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_hidx);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
-		for(uint32_t ppos_start=0; ppos_start<h_count[1];){
-			uint32_t ppos_end = ppos_start + sd.primes_per_bsgs;
+		for(ppos_start=0; ppos_start<h_count[1];){
+			ppos_end = ppos_start + sd.primes_per_bsgs;
 			if(ppos_end > h_count[1]) ppos_end = h_count[1];
-			uint32_t ppos_range = ppos_end-ppos_start;
+			ppos_range = ppos_end-ppos_start;
 
 			sclSetKernelArg(pd.giantparity, 8, sizeof(uint32_t), &ppos_start);
 			sclSetGlobalSize( pd.giantparity, ppos_range * pd.giantparity.local_size[0] );	// 1 group per prime
@@ -1322,10 +1297,10 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_htable);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_hidx);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(int32_t), &parity);
-		for(uint32_t ppos_start=0; ppos_start<h_count[2];){
-			uint32_t ppos_end = ppos_start + sd.primes_per_bsgs;
+		for(ppos_start=0; ppos_start<h_count[2];){
+			ppos_end = ppos_start + sd.primes_per_bsgs;
 			if(ppos_end > h_count[2]) ppos_end = h_count[2];
-			uint32_t ppos_range = ppos_end-ppos_start;
+			ppos_range = ppos_end-ppos_start;
 
 			sclSetKernelArg(pd.giantparity, 8, sizeof(uint32_t), &ppos_start);
 			sclSetGlobalSize( pd.giantparity, ppos_range * pd.giantparity.local_size[0] );	// 1 group per prime

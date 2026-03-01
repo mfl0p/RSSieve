@@ -169,6 +169,7 @@ void dualbasepowmodsm(ulong mbase1, ulong mbase2, uint exp, ulong p, ulong q, ul
 
 __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global uint * g_primecount,
+				__global uint * g_bsgs_count,
 				__global factor * g_factor,
 				__global const ulong8 * g_prime,
 				__global const kparity * g_k,
@@ -179,6 +180,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 
 	const int group = get_group_id(0);
 	const int primepos = start + group;
+	if(primepos >= g_bsgs_count[0]) return;
 	const int lid = get_local_id(0);
 	const int ls = get_local_size(0);
 	// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=gj_start

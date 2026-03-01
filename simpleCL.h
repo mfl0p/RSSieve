@@ -76,6 +76,7 @@ void 			sclWriteNB( sclHard hardware, size_t size, cl_mem buffer, void* hostPoin
 void			sclReadNB( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 cl_event 		sclReadNBEvent( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 void			sclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
+double 			ProfilesclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 
 /* ######################################################## */
 

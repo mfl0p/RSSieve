@@ -736,6 +736,30 @@ cl_event sclReadNBEvent( sclHard hardware, size_t size, cl_mem buffer, void *hos
 	return myEvent;
 }
 
+double ProfilesclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer ) {
+	cl_event myEvent;	
+	cl_int err;
+	cl_ulong time_start;
+	cl_ulong time_end;
+	double ns = 0.0;
+
+	err = clEnqueueReadBuffer( hardware.queue, buffer, CL_TRUE, 0, size, hostPointer, 0, NULL, &myEvent );
+	if ( err != CL_SUCCESS ) {
+		printf( "\nclRead Error\n" );
+		fprintf(stderr, "\nclRead Error\n" );
+		sclPrintErrorFlags( err );
+       	}
+
+	clWaitForEvents(1, &myEvent);
+	clGetEventProfilingInfo(myEvent, CL_PROFILING_COMMAND_START, sizeof(time_start), &time_start, NULL);
+	clGetEventProfilingInfo(myEvent, CL_PROFILING_COMMAND_END, sizeof(time_end), &time_end, NULL);
+	ns = time_end-time_start;
+
+	clReleaseEvent(myEvent);
+
+	return ns;		
+}
+
 cl_int sclFinish( sclHard hardware ){
 
 	cl_int err;
