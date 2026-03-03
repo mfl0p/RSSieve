@@ -28,14 +28,14 @@ typedef struct {
 typedef struct {
 	uint64_t pmin, pmax, p, checksum, primecount, factorcount, last_trickle, state_sum, dupcount;
 	uint32_t nmin, nmax, base;
+	int32_t kcount;
+	int klist[MAX_SEQUENCES];
 } workStatus;
 
 typedef struct {
 	uint32_t computeunits, numresults, range, psize, Q, m, QQ, mm, hsize, lmemsize, primes_per_bsgs;
-	int32_t kcount;
 	bool test, write_state_a_next, nvidia;
 	Sequence sequences[MAX_SEQUENCES];
-	int klist[MAX_SEQUENCES];
 	const char *input_file;
 } searchData;
 
@@ -60,5 +60,5 @@ int factor_can_be_used(Sequence *sequences, size_t count, uint32_t K, char sign,
 
 void mark_factor_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n);
 
-void free_sequences(searchData &sd);
+void free_sequences(searchData &sd, workStatus &st);
 

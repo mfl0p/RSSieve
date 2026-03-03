@@ -1,8 +1,6 @@
 /*
-	THIS IS AN INCOMPLETE VERSION
-
 	RSSieve
-	Bryan Little, Feb 2026
+	Bryan Little, March 2026
 
 	with contributions by Geoffrey Reynolds and Yves Gallot
 
@@ -10,8 +8,6 @@
 	CL_TARGET_OPENCL_VERSION 110 in simpleCL.h
 
 	Search limits:  P up to 2^64 and N up to 2^31
-
-
 */
 
 #include <unistd.h>
@@ -26,18 +22,12 @@
 void help()
 {
 	printf("Welcome to RSSieve, an OpenCL Riesel Sierpinski Sieve for multiple sequences k*b^n+-1 using the BSGS algorithm.\n");
-//	printf("A list of up to 100 k, one per line, are specified in seq.txt where negative k is for Riesel and positive k is for Sierpinski.\n");
 	printf("Program usage:\n");
-	printf("-b #	base, 2 <= b < 2^31\n");
-	printf("-n #	Start n\n");
-	printf("-N #	End N\n");
-	printf("		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive\n");
-	printf("-p #	Starting prime factor p\n");
-	printf("-P #	End prime factor P\n");
-	printf("		P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive\n");
-	printf("-i inputfile.abcd\n");
-	printf("-s 	Perform self test to verify proper operation of the program with the current GPU.\n");
-	printf("-h	Print this help\n");
+	printf("-p #			Starting prime factor p\n");
+	printf("-P #			End prime factor P\n");
+	printf("			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive\n");
+	printf("-i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences\n");
+	printf("-h			Print this help\n");
         boinc_finish(EXIT_FAILURE);
 }
 
@@ -96,13 +86,7 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
 
     char *token = strtok(buf, " \t");
     while (token) {
-        if (strcmp(token, "-b") == 0) {
-            token = strtok(NULL, " \t");
-            if (token && parse_uint(&st->base, token, 2, 0x7FFFFFFF) != 0) {
-                fprintf(stderr, "Invalid value for -b: %s\n", token);
-            }
-        }
-        else if (strcmp(token, "-p") == 0) {
+	if (strcmp(token, "-p") == 0) {
             token = strtok(NULL, " \t");
             if (token && parse_uint64(&st->pmin, token, 1, 0xFFFFFFFFFFFFFFFFULL) != 0) {
                 fprintf(stderr, "Invalid value for -p: %s\n", token);
@@ -112,18 +96,6 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
             token = strtok(NULL, " \t");
             if (token && parse_uint64(&st->pmax, token, 1, 0xFFFFFFFFFFFFFFFFULL) != 0) {
                 fprintf(stderr, "Invalid value for -P: %s\n", token);
-            }
-        }
-        else if (strcmp(token, "-n") == 0) {
-            token = strtok(NULL, " \t");
-            if (token && parse_uint(&st->nmin, token, 1, 0x7FFFFFFF) != 0) {
-                fprintf(stderr, "Invalid value for -n: %s\n", token);
-            }
-        }
-        else if (strcmp(token, "-N") == 0) {
-            token = strtok(NULL, " \t");
-            if (token && parse_uint(&st->nmax, token, 1, 0x7FFFFFFF) != 0) {
-                fprintf(stderr, "Invalid value for -N: %s\n", token);
             }
         }
 	else if (strcmp(token, "-i") == 0) {
@@ -139,8 +111,7 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
             sd->test = true;
         }
         else if (strcmp(token, "-h") == 0) {
-            fprintf(stderr, "Help requested\n");
-            // call help() if you have it
+		help();
         }
         // unknown flag or extra token → ignore silently
         token = strtok(NULL, " \t");
@@ -184,9 +155,6 @@ int main(int argc, char *argv[])
         boinc_options_defaults(options);
         options.normal_thread_priority = true;
         boinc_init_options(&options);
-
-	fprintf(stderr, "\nNOTE THIS IS AN INCOMPLETE VERSION!\n");
-	printf("\nNOTE THIS IS AN INCOMPLETE VERSION!\n");
 
 	fprintf(stderr, "\nRSSieve v%s.%s by Bryan Little\nwith contributions by Geoffrey Reynolds and Yves Gallot\n",VERSION_MAJOR,VERSION_MINOR);
 	fprintf(stderr, "Compiled " __DATE__ " with GCC " __VERSION__ "\n");
@@ -316,14 +284,12 @@ int main(int argc, char *argv[])
 	if(strstr((char*)device_vend, (char*)nvidia_s) != NULL){
 		sd.nvidia = true;
 	}
-	// TODO: normalize intel compute units
 	else if( strstr((char*)device_vend, (char*)intel_s) != NULL ){
 		if( strstr((char*)device_name, (char*)arc_s) != NULL ){
-			sd.computeunits /= 10;
+			sd.computeunits /= 10; // Arc
 		}
 		else{
-			sd.computeunits /= 20;
-	                fprintf(stderr,"Detected Intel integrated graphics\n");	
+			sd.computeunits /= 20; // IGP?
 		}
 	}
 

@@ -667,7 +667,51 @@ sclSoft sclGetCLSoftware( const char* source, const char* name, sclHard hardware
 	
 }
 
+sclSoft sclGetCLSoftwareWithCommon( const char* common, const char* source, const char* name, sclHard hardware, const char * options ){
 
+	sclSoft software;
+
+	sprintf( software.kernelName, "%s", name);
+	
+	size_t total_len = strlen(common) + strlen(source) + 1;
+	char *combined_src = (char *)malloc(total_len);
+	strcpy(combined_src, common);
+	strcat(combined_src, source);
+	
+	/* Create program objects from source
+	 ########################################################### */
+	software.program = _sclCreateProgram( (const char *)combined_src, hardware.context );
+	/* ########################################################### */
+	
+        free(combined_src);	
+	
+	/* Build the program (compile it)
+   	 ############################################ */
+   	_sclBuildProgram( software.program, hardware.device, name, options );
+   	/* ############################################ */
+   	
+   	/* Create the kernel object
+	 ########################################################################## */
+	software.kernel = _sclCreateKernel( software );
+	/* ########################################################################## */
+
+
+	cl_int err;
+	size_t workgroupsize;
+
+	err = clGetKernelWorkGroupInfo( software.kernel, hardware.device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &workgroupsize, NULL);
+
+	if ( err != CL_SUCCESS ) {
+		printf( "\nError getting kernel workgroup size\n");
+		fprintf(stderr, "Error getting kernel workgroup size\n");
+		sclPrintErrorFlags(err); 
+	}
+
+	software.local_size[0] = workgroupsize;
+
+	return software;
+	
+}
 
 void sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer ) {
 

@@ -8,8 +8,6 @@ With contributions by
 * Geoffrey Reynolds
 * Yves Gallot
 
-	THIS IS AN INCOMPLETE VERSION!
-
 ## Requirements
 
 * OpenCL v1.1
@@ -17,26 +15,20 @@ With contributions by
 
 ## How it works
 
-1. Search parameters are given on the command line and seq.txt file.
+1. Search parameters are given on the command line and input sr2sieve style ABCD file.
 2. A small group of sieve primes are generated on the GPU.
-3. The group of primes are tested for factors in the N range specified.
-4. Repeat #2-3 until checkpoint.  Gather factors and checksum data from GPU.
-5. Report any factors in factors.txt, along with a checksum at the end.
-6. Checksum can be used to compare results in a BOINC quorum.
+3. The group of primes are tested for factors using the BSGS algorithm.
+4. Repeat #2-3 until checkpoint.  Gather and verify factors from GPU.
+5. Report any factors in psp_sr2sieve.out
 
 ## Running the program
 ```
-A list of up to 200 k, one per line, are specified in seq.txt where negative k is for Riesel and positive k is for Sierpinski.
 command line options
-* -b #  base
-* -n #	Start n
-* -N #	End N
-* 		N range is 101 <= -n < -N < 2^31, [-n, -N) exclusive
-* -p #	Starting prime factor p
-* -P #	End prime factor P
-* 		P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive
-* -s 	Perform self test to verify proper operation of the program with the current GPU.
-* -h	Print help
+* -p #			Starting prime factor p
+* -P #			End prime factor P
+* 			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive
+* -i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences
+* -h			Print help
 
 Program gets the OpenCL GPU device index from BOINC.  To run stand-alone, the program will
 default to GPU 0 unless an init_data.xml is in the same directory with the format:

@@ -28,6 +28,7 @@
 #include <cctype>
 #include <inttypes.h>
 
+#include "boinc_api.h"
 #include "simpleCL.h"
 #include "cl_sieve.h"
 
@@ -83,16 +84,16 @@ void mark_factor_used(Sequence *sequences, size_t count, uint32_t K, char sign, 
     if (idx >= 0) mark_N_used(&sequences[idx], n);
 }
 
-void free_sequences(searchData &sd)
+void free_sequences(searchData &sd, workStatus &st)
 {
-    for (int i = 0; i < sd.kcount; ++i) {
+    for (int i = 0; i < st.kcount; ++i) {
         if (sd.sequences[i].bitmap) {
             free(sd.sequences[i].bitmap);
             sd.sequences[i].bitmap = nullptr;
             sd.sequences[i].nbits = 0;
         }
     }
-    sd.kcount = 0;
+    st.kcount = 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -222,13 +223,17 @@ void read_input(workStatus &st, searchData &sd)
         std::exit(EXIT_FAILURE);
     }
 
-    FILE *fp = std::fopen(sd.input_file, "r");
+//    FILE *fp = std::fopen(sd.input_file, "r");
+    char resolved_name[512];
+    boinc_resolve_filename(sd.input_file,resolved_name,sizeof(resolved_name));
+    FILE *fp = boinc_fopen(resolved_name,"r");
+
     if (!fp) file_error_open(sd.input_file);
 
     NVec nlists[MAX_SEQUENCES];
     std::memset(nlists, 0, sizeof(nlists));
 
-    sd.kcount = 0;
+    st.kcount = 0;
 
     char line[2048];
     uint64_t line_no = 0;
@@ -302,7 +307,7 @@ void read_input(workStatus &st, searchData &sd)
             line_error(sd.input_file, line_no, "not standard form k*b^n+/-1 (c must be +1 or -1)", line, current_seq);
         }
 
-        if (sd.kcount >= MAX_SEQUENCES) {
+        if (st.kcount >= MAX_SEQUENCES) {
             std::fclose(fp);
             char buf[256];
             std::snprintf(buf, sizeof(buf), "too many sequences (MAX_SEQUENCES=%d)", MAX_SEQUENCES);
@@ -310,7 +315,7 @@ void read_input(workStatus &st, searchData &sd)
         }
 
         // New sequence starts here
-        current_seq = (int)sd.kcount++;
+        current_seq = (int)st.kcount++;
         Sequence *seq = &sd.sequences[current_seq];
         std::memset(seq, 0, sizeof(*seq));
 
@@ -318,7 +323,7 @@ void read_input(workStatus &st, searchData &sd)
         seq->sign = (hc > 0) ? '+' : '-';
         seq->N0   = hn;
 
-        sd.klist[current_seq] = (seq->sign == '+') ? (int)hk : -(int)hk;
+        st.klist[current_seq] = (seq->sign == '+') ? (int)hk : -(int)hk;
 
         // Reset running_n and record N0
         running_n = hn;
@@ -332,13 +337,13 @@ void read_input(workStatus &st, searchData &sd)
     }
     std::fclose(fp);
 
-    if (sd.kcount == 0 || global_B < 0) {
+    if (st.kcount == 0 || global_B < 0) {
         std::fprintf(stderr, "%s: no sequences found in input\n", sd.input_file);
         std::exit(EXIT_FAILURE);
     }
 
     // Build bitmaps + compute lastN/NMIN/NMAX
-    for (int i = 0; i < sd.kcount; i++) {
+    for (int i = 0; i < st.kcount; i++) {
         Sequence *seq = &sd.sequences[i];
         NVec *nv = &nlists[i];
 
@@ -396,12 +401,15 @@ void read_input(workStatus &st, searchData &sd)
     st.nmin = NMIN;
     st.nmax = NMAX;
 
-    std::printf("Sequences read: %d\n", (int)sd.kcount);
+    std::printf("Sequences read: %d\n", (int)st.kcount);
+    std::fprintf(stderr, "Sequences read: %d\n", (int)st.kcount);
     std::printf("Base = %" PRIu32 "\n", st.base);
-    std::printf("NMIN = %" PRIu32 "\n", st.nmin);
-    std::printf("NMAX = %" PRIu32 "\n", st.nmax);
+    std::fprintf(stderr, "Base = %" PRIu32 "\n", st.base);
 
-    std::printf("klist array: ");
-    for (int i = 0; i < sd.kcount; i++) std::printf("%d ", sd.klist[i]);
-    std::printf("\n");
+//    std::printf("NMIN = %" PRIu32 "\n", st.nmin);
+//    std::printf("NMAX = %" PRIu32 "\n", st.nmax);
+
+//    std::printf("klist array: ");
+//    for (int i = 0; i < st.kcount; i++) std::printf("%d ", st.klist[i]);
+//    std::printf("\n");
 }

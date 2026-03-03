@@ -5,19 +5,6 @@
 	generate primes <= 113
 */
 
-ulong add(ulong a, ulong b, ulong p){
-	ulong r;
-	ulong c = (a >= p - b) ? p : 0;
-	r = a + b - c;
-	return r;
-}
-
-ulong invert(ulong p){
-	ulong p_inv = 1, prev = 0;
-	while (p_inv != prev) { prev = p_inv; p_inv *= 2 - p * p_inv; }
-	return p_inv;
-}
-
 __kernel void addsmallprimes(ulong low, ulong high, __global ulong8 *g_prime, __global uint *g_primecount){
 
 	const uint gid = get_global_id(0);

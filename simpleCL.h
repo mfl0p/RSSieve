@@ -82,7 +82,7 @@ double 			ProfilesclRead( sclHard hardware, size_t size, cl_mem buffer, void *ho
 
 /* ####### inicialization of sclSoft structs  ############## */
 sclSoft 		sclGetCLSoftware( const char* source, const char* name, sclHard hardware, const char * options );
-
+sclSoft 		sclGetCLSoftwareWithCommon( const char* common, const char* source, const char* name, sclHard hardware, const char * options );
 /* ######################################################## */
 
 /* ####### Release and retain OpenCL objects ############## */

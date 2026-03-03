@@ -1,42 +1,31 @@
 /*
 
-	giant.cl - Bryan Little 2/2026, montgomery arithmetic by Yves Gallot
+	giant.cl - Bryan Little 3/2026, montgomery arithmetic by Yves Gallot
 
 	the baby-step-giant-step algorithm in local memory
 
 	testing shows optimal hash table size is 8192 with 4096 elements inserted.
 	nvidia gpus usually expose 49152 bytes of lmem to the kernels.
 	since we cannot partition the L1/lmem in OpenCL like CUDA, we have to get creative making the hash table fit.
-	we store the full 64 bit key and index to global memory.
-	a 32 bit fingerprint is created by mixing the hi and lo bits of the key.
-	the fingerprint is stored in lmem for fast atomic setup and lookups.
-	we check the full 64 bit key and index in global memory only if the fingerprint matches.
-	testing on rtx 5090 shows performance is about 97% of storing the entire 64 bit keys in partitioned lmem.
+	we store the upper 32 bits of the value and the index to global memory.
+	the lower 32 bits are stored to local memory for fast atomic setup and lookup.
+	we check the hi 32 bits in global memory only if the lower 32 bits match.
+	if the hi bits match, we have a solution and can use the index stored global memory.
+	upper 32 bits are needed as we expect a large amount of collisions during the giant steps. 
+	testing on rtx 5090 shows performance is about 97% of storing the entire 64 bit values in partitioned lmem.
 
 */
 
-typedef struct {
-	ulong p;
-	int n;
-	int k;
-} factor;
-
-typedef struct {
-	ulong hadj;
-	int kidx;
-} kparity;
-
-void hash_insert(__global ulong *htable, __global int *hidx, ulong val, int idx, const uint offset, __local uint *ltable){
+void hash_insert(__global uint *htable, __global short *hidx, ulong val, int idx, const uint offset, __local uint *ltable){
 	uint lo = (uint)val;
 	uint hi = (uint)(val >> 32);
-	uint mixed = lo ^ (hi * 0x9E3779B1u);
-	uint pos = mixed & MASK;			// mixed % HSIZE
+	uint pos = lo & MASK; // lo % HSIZE
 	while(true){
 		// Slot looks free, try to claim it
-		if(atomic_cmpxchg( (volatile __local uint *)&ltable[pos], 0, mixed) == 0){
-			// We successfully claimed the slot and stored the 32 bit fingerprint in local mem
+		if(atomic_cmpxchg( (volatile __local uint *)&ltable[pos], 0, lo) == 0){
+			// We successfully claimed the slot and stored the lower 32 bits to local mem
 			uint poff = pos+offset;
-			htable[poff] = val;		// store the 64 bit key in global mem
+			htable[poff] = hi;		// store the upper 32 bits in global mem
 			hidx[poff] = idx;		// store the index in global mem
 			return;
 		}
@@ -45,16 +34,15 @@ void hash_insert(__global ulong *htable, __global int *hidx, ulong val, int idx,
 	}
 }
 
-int hash_lookup(__global const ulong *htable, __global const int *hidx, ulong val, int *idx_out, const uint offset, __local const uint *ltable) {
+int hash_lookup(__global const uint *htable, __global const short *hidx, ulong val, int *idx_out, const uint offset, __local const uint *ltable) {
 	uint lo = (uint)val;
 	uint hi = (uint)(val >> 32);
-	uint mixed = lo ^ (hi * 0x9E3779B1u);
-	uint pos = mixed & MASK;			// mixed % HSIZE
+	uint pos = lo & MASK; // lo % HSIZE
 	uint start = pos;
 	while(ltable[pos] != 0){			// slot is used
-		if(ltable[pos] == mixed){		// matched the 32 bit fingerprint
+		if(ltable[pos] == lo){			// matched the lower 32 bits
 			uint poff = pos+offset;
-			if(htable[poff] == val) {	// check if the 64 bit key also matches
+			if(htable[poff] == hi) {	// check if the upper 32 bits also match
 				*idx_out = hidx[poff];	// use the index
 				return 1;
 			}
@@ -65,108 +53,6 @@ int hash_lookup(__global const ulong *htable, __global const int *hidx, ulong va
 	return 0;
 }
 
-ulong add(ulong a, ulong b, ulong p){
-	ulong r;
-	ulong c = (a >= p - b) ? p : 0;
-	r = a + b - c;
-	return r;
-}
-
-ulong m_mul(ulong a, ulong b, ulong p, ulong q){
-	ulong lo = a*b;
-	ulong hi = mul_hi(a,b);
-	ulong m = lo * q;
-	ulong mp = mul_hi(m,p);
-	ulong r = hi - mp;
-	return ( hi < mp ) ? r + p : r;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
-	if(!exp)return one;
-	if(exp==1)return mbase;
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-			a = m_mul(a,mbase,p,q);
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
-	if(!exp)return one;
-	if(exp==1)return mbase;
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-#if BASE == 2
-			a = add(a, a, p);	// a * 2
-#elif BASE == 3
-			ulong b = add(a, a, p);
-			a = add(a, b, p);	// a * 3
-#elif BASE == 5
-			ulong b = add(a, a, p);
-			b = add(b, b, p);
-			a = add(a, b, p);	// a * 5
-#elif BASE > 5
-			a = m_mul(a,mbase,p,q);	// a * BASE
-#endif
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// dual powmod, base^lid and gQ_inv^lid
-// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-void dualbasepowmodsm(ulong mbase1, ulong mbase2, uint exp, ulong p, ulong q, ulong one, ulong *res1, ulong *res2) {
-	if(!exp){
-		*res1 = one;
-		*res2 = one;
-		return;
-	}
-	if(exp==1){
-		*res1 = mbase1;
-		*res2 = mbase2;
-		return;
-	}
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a1 = mbase1;
-	ulong a2 = mbase2;
-	while( curBit )	{
-		a1 = m_mul(a1,a1,p,q);
-		a2 = m_mul(a2,a2,p,q);
-		if(exp & curBit){
-#if BASE == 2
-			a1 = add(a1, a1, p);		// a*2
-#elif BASE == 3
-			ulong b1 = add(a1, a1, p);
-			a1 = add(a1, b1, p);		// a*3
-#elif BASE == 5
-			ulong b1 = add(a1, a1, p);
-			b1 = add(b1, b1, p);
-			a1 = add(a1, b1, p);		// a*5
-#elif BASE > 5
-			a1 = m_mul(a1,mbase1,p,q);	// a*BASE
-#endif
-			a2 = m_mul(a2,mbase2,p,q);
-		}
-		curBit >>= 1;
-	}
-	*res1 = a1;
-	*res2 = a2;
-}
-
 __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global uint * g_primecount,
 				__global uint * g_bsgs_count,
@@ -174,13 +60,15 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global const ulong8 * g_prime,
 				__global const kparity * g_k,
 				__global const int * g_kcount,
-				__global ulong * g_htable,
-				__global int * g_hidx,
+				__global uint * g_htable,
+				__global short * g_hidx,
 				const uint start ) {
 
 	const int group = get_group_id(0);
 	const int primepos = start + group;
-	if(primepos >= g_bsgs_count[0]) return;
+	if(!start){	// first iteration of kernel could overflow
+		if(primepos >= g_bsgs_count[0]) return;
+	}
 	const int lid = get_local_id(0);
 	const int ls = get_local_size(0);
 	// .s0=p, .s1=q, .s2=one, .s3=montgomerized base, .s4=gj_inc, .s5=gQ_inv, .s6=gQ_step_inc, .s7=gj_start
@@ -238,8 +126,8 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 				__global const ulong8 * g_prime,
 				__global const kparity * g_k,
 				__global const int * g_kcount,
-				__global ulong * g_htable,
-				__global int * g_hidx,
+				__global uint * g_htable,
+				__global short * g_hidx,
 				const int parity,
 				const int start ) {
 

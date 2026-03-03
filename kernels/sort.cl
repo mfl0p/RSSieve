@@ -8,76 +8,6 @@
 
 */
 
-typedef struct {
-	ulong hadj;
-	int parity;
-	int kidx;
-} kdata;
-
-typedef struct {
-	ulong hadj;
-	int kidx;
-} kparity;
-
-ulong add(ulong a, ulong b, ulong p){
-	ulong r;
-	ulong c = (a >= p - b) ? p : 0;
-	r = a + b - c;
-	return r;
-}
-
-ulong m_mul(ulong a, ulong b, ulong p, ulong q){
-	ulong lo = a*b;
-	ulong hi = mul_hi(a,b);
-	ulong m = lo * q;
-	ulong mp = mul_hi(m,p);
-	ulong r = hi - mp;
-	return ( hi < mp ) ? r + p : r;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong powmodsm(ulong mbase, uint exp, ulong p, ulong q) {
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-			a = m_mul(a,mbase,p,q);
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q, ulong one) {
-	if(!exp)return one;
-	if(exp==1)return mbase;
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-#if BASE == 2
-			a = add(a, a, p);	// a * 2
-#elif BASE == 3
-			ulong b = add(a, a, p);
-			a = add(a, b, p);	// a * 3
-#elif BASE == 5
-			ulong b = add(a, a, p);
-			b = add(b, b, p);
-			a = add(a, b, p);	// a * 5
-#elif BASE > 5
-			a = m_mul(a,mbase,p,q);	// a * BASE
-#endif
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
 __kernel void sort(	__global uint * g_primecount,
 			__global uint * g_bsgs_count,
 			__global const ulong8 * g_prime,
@@ -144,11 +74,17 @@ __kernel void sort(	__global uint * g_primecount,
 	}
 
 	ulong gj_start = basepowmodsm(prime.s3, NMIN, prime.s0, prime.s1, prime.s2);	// base^NMIN, NMIN is even
-	ulong gj_inc = basepowmodsm(prime.s3, LS, prime.s0, prime.s1, prime.s2);	// base^(localsize of giant kernel)
-	ulong gjj_inc = m_mul(gj_inc, gj_inc, prime.s0, prime.s1);			// base^(localsize of giant kernel * 2)
-	ulong gQ_step_inc = powmodsm(prime.s5, LS, prime.s0, prime.s1);			// gQ_inv^(localsize of giant kernel)
-	ulong gQQ_inv = m_mul(prime.s5, prime.s5, prime.s0, prime.s1);			// gQ_inv * gQ_inv
-	ulong gQQ_step_inc = m_mul(gQ_step_inc, gQ_step_inc, prime.s0, prime.s1);	// gQQ_inv^(localsize of giant kernel)
+	ulong gj_inc, gQ_step_inc;
+
+	// dual powmod, base^lid and gQ_inv^lid
+	dualbasepowmodsm(prime.s3, prime.s5, LS, prime.s0, prime.s1, prime.s2, &gj_inc, &gQ_step_inc);
+
+	ulong gjj_inc, gQQ_step_inc, gQQ_inv;
+	if(ke || ko){
+		gjj_inc = m_mul(gj_inc, gj_inc, prime.s0, prime.s1);			// base^(localsize of giant kernel * 2)
+		gQQ_step_inc = m_mul(gQ_step_inc, gQ_step_inc, prime.s0, prime.s1);	// gQ_inv^(localsize of giant kernel * 2)
+		gQQ_inv = m_mul(prime.s5, prime.s5, prime.s0, prime.s1);		// gQ_inv^2
+	}
 
 	// full range
 	if(kf){

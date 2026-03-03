@@ -5,13 +5,13 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 0
-VERSION_MINOR := 13
+VERSION_MINOR := 15
 date := $(shell powershell.exe get-date -format FileDate)
 
 APP = RSSieve-win64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date).exe
 
-SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h inputfile.cpp kernels/sort.cl kernels/giant.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl verify_factor.c verify_factor.h
-KERNEL_HEADERS = kernels/sort.h kernels/giant.h kernels/clearn.h kernels/clearresult.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h inputfile.cpp kernels/common.cl kernels/sort.cl kernels/giant.cl kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/addsmallprimes.cl kernels/setup.cl verify_factor.c verify_factor.h
+KERNEL_HEADERS = kernels/common.h kernels/sort.h kernels/giant.h kernels/clearn.h kernels/clearresult.h kernels/setup.h kernels/getsegprimes.h kernels/addsmallprimes.h
 OBJ = main.o cl_sieve.o simpleCL.o verify_factor.o inputfile.o
 
 LIBS = OpenCL.dll

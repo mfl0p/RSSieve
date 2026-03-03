@@ -8,98 +8,6 @@
 
 */
 
-typedef struct {
-	ulong hadj;
-	int parity;
-	int kidx;
-} kdata;
-
-// note: removed Nvidia asm, not needed
-// The scheduler recognizes the dependency of lo and hi multiply.
-// It executes one multiply and routes results to two registers.
-ulong m_mul(ulong a, ulong b, ulong p, ulong q){
-	ulong lo = a*b;
-	ulong hi = mul_hi(a,b);
-	ulong m = lo * q;
-	ulong mp = mul_hi(m,p);
-	ulong r = hi - mp;
-	return ( hi < mp ) ? r + p : r;
-}
-
-ulong add(ulong a, ulong b, ulong p){
-	ulong r;
-	ulong c = (a >= p - b) ? p : 0;
-	r = a + b - c;
-	return r;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 64 bit exponent
-ulong powmodlg(ulong mbase, ulong exp, ulong p, ulong q) {
-	ulong curBit = 0x8000000000000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-			a = m_mul(a,mbase,p,q);
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 64 bit exponent
-ulong basepowmodlg(ulong mbase, ulong exp, ulong p, ulong q) {
-	ulong curBit = 0x8000000000000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-#if BASE == 2
-			a = add(a, a, p);	// a * 2
-#elif BASE == 3
-			ulong b = add(a, a, p);
-			a = add(a, b, p);	// a * 3
-#elif BASE == 5
-			ulong b = add(a, a, p);
-			b = add(b, b, p);
-			a = add(a, b, p);	// a * 5
-#elif BASE > 5
-			a = m_mul(a,mbase,p,q);	// a * BASE
-#endif
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
-// left to right powmod montgomerizedbase^exp mod P, with 32 bit exponent
-ulong basepowmodsm(ulong mbase, uint exp, ulong p, ulong q) {
-	uint curBit = 0x80000000;
-	curBit >>= ( clz(exp) + 1 );
-	ulong a = mbase;
-	while( curBit )	{
-		a = m_mul(a,a,p,q);
-		if(exp & curBit){
-#if BASE == 2
-			a = add(a, a, p);	// a * 2
-#elif BASE == 3
-			ulong b = add(a, a, p);
-			a = add(a, b, p);	// a * 3
-#elif BASE == 5
-			ulong b = add(a, a, p);
-			b = add(b, b, p);
-			a = add(a, b, p);	// a * 5
-#elif BASE > 5
-			a = m_mul(a,mbase,p,q);	// a * BASE
-#endif
-		}
-		curBit >>= 1;
-	}
-	return a;
-}
-
 int good_pr(ulong8 prime, ulong exponent){
 	ulong rg = basepowmodlg(prime.s3, exponent, prime.s0, prime.s1);
 	if(rg == prime.s2){
@@ -226,7 +134,7 @@ __kernel void setup(	__global ulong8 * g_prime,
 	ulong mk[KCOUNT+1];
 	ulong prefix[KCOUNT+1];
 
-	ulong gQ = basepowmodsm(prime.s3, Q, prime.s0, prime.s1);
+	ulong gQ = basepowmodsm(prime.s3, Q, prime.s0, prime.s1, prime.s2);
 
 	mk[KCOUNT] = gQ;	// use last index for gQ_inverse
 
@@ -297,11 +205,11 @@ __kernel void setup(	__global ulong8 * g_prime,
 
 	// we can skip this p if all k have no solutions
 	if(count[0] == KCOUNT){
-		atomic_inc(&g_primecount[3]);
+//		atomic_inc(&g_primecount[3]);
 		g_prime[gid].s0 = 0;
 		return;
 	}
-
+/*
 	// counters for testing
 	if(count[0]){		// skipped
 		atomic_add(&g_primecount[5],count[0]);
@@ -315,7 +223,7 @@ __kernel void setup(	__global ulong8 * g_prime,
 	if(count[3]){		// odd
 		atomic_add(&g_primecount[8],count[3]);
 	}
-
+*/
 }
 
 

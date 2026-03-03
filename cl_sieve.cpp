@@ -1,6 +1,4 @@
 /*
-	THIS IS AN INCOMPLETE VERSION
-
 	RSSieve
 	Bryan Little, Feb 2026
 	
@@ -10,7 +8,6 @@
 	CL_TARGET_OPENCL_VERSION 110 in simpleCL.h
 
 	Search limits:  P up to 2^64 and N up to 2^31
-
 */
 
 #include <unistd.h>
@@ -29,6 +26,7 @@
 #include "setup.h"
 #include "giant.h"
 #include "sort.h"
+#include "common.h"
 
 #include "cl_sieve.h"
 #include "verify_factor.h"
@@ -76,7 +74,6 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseMemObject(pd.d_primes_full);
 	sclReleaseMemObject(pd.d_primes_even);
 	sclReleaseMemObject(pd.d_primes_odd);
-	sclReleaseMemObject(pd.d_primecount);
 	sclReleaseMemObject(pd.d_k);
 	sclReleaseMemObject(pd.d_k_full);
 	sclReleaseMemObject(pd.d_k_even);
@@ -86,6 +83,9 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseMemObject(pd.d_kcount_odd);
 	sclReleaseMemObject(pd.d_htable);
 	sclReleaseMemObject(pd.d_hidx);
+
+	sclReleaseMemObject(pd.d_sum);
+	sclReleaseMemObject(pd.d_primecount);
 	sclReleaseMemObject(pd.d_bsgs_count);
 
 	sclReleaseClSoft(pd.clearn);
@@ -104,7 +104,10 @@ void write_state( workStatus & st, searchData & sd ){
 
 	FILE * out;
 
-	st.state_sum = st.base+st.pmin+st.pmax+st.p+st.checksum+st.primecount+st.factorcount+st.last_trickle+st.nmin+st.nmax;
+	st.state_sum = st.base+st.pmin+st.pmax+st.p+st.checksum+st.primecount+st.factorcount+st.last_trickle+st.nmin+st.nmax+st.kcount+st.dupcount;
+	for(int i=0; i<st.kcount; ++i){
+		st.state_sum += st.klist[i];
+	}
 
         if (sd.write_state_a_next){
 		if ((out = my_fopen(STATE_FILENAME_A,"wb")) == NULL)
@@ -131,7 +134,6 @@ void write_state( workStatus & st, searchData & sd ){
 	}
 }
 
-// TODO:  Add K list
 int read_state( workStatus & st, searchData & sd ){
 
 	FILE * in;
@@ -149,14 +151,18 @@ int read_state( workStatus & st, searchData & sd ){
 			printf("Cannot parse %s !!!\n",STATE_FILENAME_A);
 			good_state_a = false;
 		}
-		else if(stat_a.base != st.base || stat_a.pmin != st.pmin || stat_a.pmax != st.pmax || stat_a.nmin != st.nmin || stat_a.nmax != st.nmax){
+		else if(stat_a.base != st.base || stat_a.pmin != st.pmin || stat_a.pmax != st.pmax || stat_a.nmin != st.nmin || stat_a.nmax != st.nmax
+			|| stat_a.kcount != st.kcount){
 			fprintf(stderr,"Invalid checkpoint file %s !!!\n",STATE_FILENAME_A);
 			printf("Invalid checkpoint file %s !!!\n",STATE_FILENAME_A);
 			good_state_a = false;
 		}
 		else{
 			uint64_t state_sum = stat_a.base+stat_a.pmin+stat_a.pmax+stat_a.p+stat_a.checksum+stat_a.primecount+stat_a.factorcount
-						+stat_a.last_trickle+stat_a.nmin+stat_a.nmax;
+						+stat_a.last_trickle+stat_a.nmin+stat_a.nmax+stat_a.kcount+stat_a.dupcount;
+			for(int i=0; i<stat_a.kcount; ++i){
+				state_sum += stat_a.klist[i];
+			}
 			if(state_sum != stat_a.state_sum){
 				fprintf(stderr,"Checksum error in %s !!!\n",STATE_FILENAME_A);
 				printf("Checksum error in %s !!!\n",STATE_FILENAME_A);
@@ -176,14 +182,18 @@ int read_state( workStatus & st, searchData & sd ){
 			printf("Cannot parse %s !!!\n",STATE_FILENAME_B);
 			good_state_b = false;
 		}
-		else if(stat_b.base != st.base || stat_b.pmin != st.pmin || stat_b.pmax != st.pmax || stat_b.nmin != st.nmin || stat_b.nmax != st.nmax){
+		else if(stat_b.base != st.base || stat_b.pmin != st.pmin || stat_b.pmax != st.pmax || stat_b.nmin != st.nmin || stat_b.nmax != st.nmax
+			|| stat_b.kcount != st.kcount){
 			fprintf(stderr,"Invalid checkpoint file %s !!!\n",STATE_FILENAME_B);
 			printf("Invalid checkpoint file %s !!!\n",STATE_FILENAME_B);
 			good_state_b = false;
 		}
 		else{
 			uint64_t state_sum = stat_b.base+stat_b.pmin+stat_b.pmax+stat_b.p+stat_b.checksum+stat_b.primecount+stat_b.factorcount
-						+stat_b.last_trickle+stat_b.nmin+stat_b.nmax;
+						+stat_b.last_trickle+stat_b.nmin+stat_b.nmax+stat_b.kcount+stat_b.dupcount;
+			for(int i=0; i<stat_b.kcount; ++i){
+				state_sum += stat_b.klist[i];
+			}
 			if(state_sum != stat_b.state_sum){
 				fprintf(stderr,"Checksum error in %s !!!\n",STATE_FILENAME_B);
 				printf("Checksum error in %s !!!\n",STATE_FILENAME_B);
@@ -293,8 +303,7 @@ void sleepCPU(sclHard hardware){
 	cl_event kernelsDone;
 	cl_int err;
 	cl_int info;
-#ifdef _WIN32
-#else
+#ifndef _WIN32
 	struct timespec sleep_time;
 	sleep_time.tv_sec = 0;
 	sleep_time.tv_nsec = 1000000;	// 1ms
@@ -456,8 +465,8 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 		printf("error: getsegprimes kernel local memory overflow\n");
 		exit(EXIT_FAILURE);
 	}
-
-	double totalk = ((double)*h_sum - (double)h_primecount[3]) * (double)sd.kcount;
+/*
+	double totalk = ((double)*h_sum - (double)h_primecount[3]) * (double)st.kcount;
 	double skipped = (double)h_primecount[5] / totalk * 100.0;
 	double full = (double)h_primecount[11] / totalk * 100.0;
 	double even = (double)h_primecount[7] / totalk * 100.0;
@@ -470,13 +479,6 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 	printf("%.1f%% k full range n\n",full);
 	printf("%.1f%% k restricted to even n\n",even);
 	printf("%.1f%% k restricted to odd n\n",odd);
-/*
-	printf("%u primes skipped\n",h_primecount[3]);
-	printf("%u k total\n",*h_sum * sd.kcount);
-	printf("%u k skipped\n",h_primecount[5]);
-	printf("%u k full range n\n",h_primecount[11]);
-	printf("%u k restricted to even n\n",h_primecount[7]);
-	printf("%u k restricted to odd n\n",h_primecount[8]);
 */
 	uint32_t numfactors = h_primecount[2];
 	if(numfactors){
@@ -538,8 +540,8 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			int32_t fc = (h_factor[i].k < 0) ? -1 : 1;
 			char sign = (h_factor[i].k < 0) ? '-' : '+';
 			if(fp){
- 				if( factor_can_be_used(sd.sequences, sd.kcount, fk, sign, fn) ){
-					mark_factor_used(sd.sequences, sd.kcount, fk, sign, fn);
+ 				if( factor_can_be_used(sd.sequences, st.kcount, fk, sign, fn) ){
+					mark_factor_used(sd.sequences, st.kcount, fk, sign, fn);
 					++st.factorcount;
 
 					if(resfile == NULL){
@@ -561,7 +563,7 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 //					printf( "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
 				}
 				// add the factor to checksum
-				st.checksum += fk + fn + fc;
+				st.checksum += fp + fk + fn + fc;
 			}
 		}
 		if(resfile != NULL){
@@ -589,12 +591,6 @@ bool is_perfect_power(uint64_t b, uint32_t *base) {
 
 void setupSearch(workStatus & st, searchData & sd){
 
-	if(!st.base){
-		printf("\n-b argument is required\nuse -h for help\n");
-		fprintf(stderr, "-b argument is required\n");
-		exit(EXIT_FAILURE);
-	}
-
 	uint32_t basepow;
 	if( is_perfect_power(st.base, &basepow) ){
 		printf("\nerror: selected base %u is a perfect power of base %u!\n", st.base, basepow);
@@ -602,23 +598,9 @@ void setupSearch(workStatus & st, searchData & sd){
 		exit(EXIT_FAILURE);
 	}
 
-	st.p = st.pmin;
-
 	if(!st.pmin || !st.pmax){
 		printf("\n-p and -P arguments are required\nuse -h for help\n");
 		fprintf(stderr, "-p and -P arguments are required\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if(!st.nmin || !st.nmax){
-		printf("\n-n and -N arguments are required\nuse -h for help\n");
-		fprintf(stderr, "-n and -N arguments are required\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if (st.nmin > st.nmax){
-		printf("nmin <= nmax is required\nuse -h for help\n");
-		fprintf(stderr, "nmin <= nmax is required\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -628,11 +610,7 @@ void setupSearch(workStatus & st, searchData & sd){
 		exit(EXIT_FAILURE);
 	}
 
-	if (st.nmin&1){
-		printf("even nmin is required\nuse -h for help\n");
-		fprintf(stderr, "even nmin is required\n");
-		exit(EXIT_FAILURE);
-	}
+	st.p = st.pmin;
 
 	// increase result buffer at low P range
 	// it's still possible to overflow this with a fast GPU and large search range
@@ -647,11 +625,9 @@ void setupSearch(workStatus & st, searchData & sd){
 
 }
 
-
-
+// calculate approximate work chunk size based on gpu's compute units
 void profileGPU(progData & pd, workStatus & st, searchData & sd, sclHard hardware){
 
-	// calculate approximate chunk size based on gpu's compute units
 	uint64_t start = st.p;
 
 	uint64_t range_primes = sd.computeunits * 256;
@@ -676,6 +652,7 @@ void profileGPU(progData & pd, workStatus & st, searchData & sd, sclHard hardwar
 
 	// calculate prime array size based on result
 	uint64_t mem_size = (uint64_t)( 1.5 * (double)range_primes );
+
 	// make it a multiple of check kernel's local size
 //	mem_size = (mem_size / pd.check.local_size[0]) * pd.check.local_size[0];	
 
@@ -775,25 +752,11 @@ char* generate_constant_array_string(const int *arr, size_t n, const char *name)
 
 void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searchData & sd, char *klist){
 
-	int total_len = strlen(giant_cl) + strlen(klist) + 1;
-	char src_str[total_len];
-	snprintf(src_str, sizeof(src_str), "%s%s", klist, giant_cl);
-	const char *sources[] = { src_str };
-
-	cl_int err;
-	sclSoft software;
-	software.program = clCreateProgramWithSource( hardware.context, 1, sources, NULL, &err );
-	if( err!=CL_SUCCESS ) {
-		printf( "Error on bsgs createProgram\n" );
-		fprintf(stderr, "Error on bsgs createProgram\n" );
-		sclPrintErrorFlags( err );
-	}
-
 	sd.hsize = 8192;
 	sd.Q = 4096;
 
 	uint32_t nvidia_reserved = 8;
-	uint32_t lmem_to_allocate = sd.hsize * sizeof(cl_uint) + sd.kcount * sizeof(cl_ulong) + nvidia_reserved;
+	uint32_t lmem_to_allocate = sd.hsize * sizeof(cl_uint) + st.kcount * sizeof(cl_ulong) + nvidia_reserved;
 	if(lmem_to_allocate > sd.lmemsize){
 		fprintf(stderr,"ERROR: OpenCL device has insufficient local memory. Need %u bytes.\n", lmem_to_allocate);
 		printf("ERROR: OpenCL device has insufficient local memory. Need %u bytes.\n", lmem_to_allocate);
@@ -807,59 +770,19 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 	sd.QQ = sd.Q<<1;
 	sd.mm = (uint32_t) ceil((double)L / sd.QQ);
 
+	// bake constants into kernel source
 	char cldef[256];
-	// add "-cl-nv-verbose" for build log info
 	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u",
-		sd.hsize, sd.hsize-1, sd.Q, sd.m, sd.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base);
-/*
-	// print nvidia kernel build log
-	char build_c[4096];
-	err = clBuildProgram( software.program, 0, NULL, cldef, NULL, NULL );
-	clGetProgramBuildInfo( software.program, hardware.device, CL_PROGRAM_BUILD_LOG, 4096, build_c, NULL );
-	printf( "Build Log\n%s\n", build_c );
-*/
-	err = clBuildProgram( software.program, 0, NULL, cldef, NULL, NULL );
-	if ( err != CL_SUCCESS ) {
-		printf( "Error on BuildProgram %s ", software.kernelName );
-		fprintf(stderr, "Error on BuildProgram %s ", software.kernelName );
-		sclPrintErrorFlags( err );
-	}
+		sd.hsize, sd.hsize-1, sd.Q, sd.m, st.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base);
 
-	sprintf( software.kernelName, "%s", "giantfull");
-	software.kernel = clCreateKernel( software.program, software.kernelName, &err );
-	if ( err != CL_SUCCESS ) {
-		printf( "Error on createKernel %s ", software.kernelName );
-		fprintf(stderr, "Error on createKernel %s ", software.kernelName );
-		sclPrintErrorFlags( err );
-	}
+	int total_len = strlen(giant_cl) + strlen(klist) + 1;
+	char src_str[total_len];
+	snprintf(src_str, sizeof(src_str), "%s%s", klist, giant_cl);
 
-	size_t workgroupsize;
-	err = clGetKernelWorkGroupInfo( software.kernel, hardware.device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &workgroupsize, NULL);
-	if ( err != CL_SUCCESS ) {
-		printf( "\nError getting kernel workgroup size\n");
-		fprintf(stderr, "Error getting kernel workgroup size\n");
-		sclPrintErrorFlags(err); 
-	}
-	software.local_size[0] = workgroupsize;
-	pd.giantfull = software;
+	pd.giantfull = sclGetCLSoftwareWithCommon(common_cl,src_str,"giantfull",hardware, cldef);
+	pd.giantparity = sclGetCLSoftwareWithCommon(common_cl,src_str,"giantparity",hardware, cldef);
 
-	sprintf( software.kernelName, "%s", "giantparity");
-	software.kernel = clCreateKernel( software.program, software.kernelName, &err );
-	if ( err != CL_SUCCESS ) {
-		printf( "Error on createKernel %s ", software.kernelName );
-		fprintf(stderr, "Error on createKernel %s ", software.kernelName );
-		sclPrintErrorFlags( err );
-	}
-
-	err = clGetKernelWorkGroupInfo( software.kernel, hardware.device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &workgroupsize, NULL);
-	if ( err != CL_SUCCESS ) {
-		printf( "\nError getting kernel workgroup size\n");
-		fprintf(stderr, "Error getting kernel workgroup size\n");
-		sclPrintErrorFlags(err); 
-	}
-	software.local_size[0] = workgroupsize;
-	pd.giantparity = software;
-
+	// use max threads per block
 	if(sd.nvidia){
 		if(pd.giantparity.local_size[0] != 1024){
 			pd.giantparity.local_size[0] = 1024;
@@ -867,9 +790,10 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 		if(pd.giantfull.local_size[0] != 1024){
 			pd.giantfull.local_size[0] = 1024;
 		}
-		fprintf(stderr, "Set BSGS local size to 1024\n");
-		printf("Set BSGS local size to 1024\n");
 	}
+
+	fprintf(stderr, "LS: %zu,%zu\n",pd.giantfull.local_size[0],pd.giantparity.local_size[0]);
+	printf("BSGS local size is %zu,%zu\n",pd.giantfull.local_size[0],pd.giantparity.local_size[0]);
 
 	size_t kernel_local_mem;
 	clGetKernelWorkGroupInfo(pd.giantparity.kernel,
@@ -878,8 +802,8 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 	                 sizeof(size_t),
 	                 &kernel_local_mem,
 	                 NULL);
-	printf("BSGS kernel local mem used %u bytes\n",(uint32_t)kernel_local_mem);
-	fprintf(stderr, "BSGS kernel local mem used %u bytes\n",(uint32_t)kernel_local_mem);
+	printf("lmem size %u bytes\n",(uint32_t)kernel_local_mem);
+	fprintf(stderr, "lmem size %u bytes\n",(uint32_t)kernel_local_mem);
 
 }
 
@@ -893,83 +817,43 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	if(sd.input_file){
 		read_input(st,sd);
 	}
+	else{
+		printf("ERROR: no input file specified!\n");
+		fprintf(stderr, "ERROR: no input file specified!\n");
+		exit(EXIT_FAILURE);
+	}
 
 	// setup kernel parameters
 	setupSearch(st,sd);
 
-	// device -> host transfer arrays
-        pd.d_factor = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, sd.numresults*sizeof(factor), NULL, &err );
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: d_factor array.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	pd.d_primecount = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, 12*sizeof(cl_uint), NULL, &err );
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: d_primecount array.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	pd.d_bsgs_count = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, 3*sizeof(cl_uint), NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: d_bsgs_count array.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-        pd.d_sum = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, sizeof(cl_ulong), NULL, &err );
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clCreateBuffer failure: d_sum array.\n");
-                printf( "ERROR: clCreateBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-
-	// map to host
-	cl_uint *h_primecount = (cl_uint*)clEnqueueMapBuffer(hardware.queue, pd.d_primecount, CL_FALSE, CL_MAP_READ, 0, 12*sizeof(cl_uint), 0, NULL, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_primecount array.\n");
-                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	cl_uint *h_count = (cl_uint*)clEnqueueMapBuffer(hardware.queue, pd.d_bsgs_count, CL_FALSE, CL_MAP_READ, 0, 3*sizeof(cl_uint), 0, NULL, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_count array.\n");
-                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	cl_ulong *h_sum = (cl_ulong*)clEnqueueMapBuffer(hardware.queue, pd.d_sum, CL_TRUE, CL_MAP_READ, 0, sizeof(cl_ulong), 0, NULL, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_sum.\n");
-                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-
-        pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware, NULL);
-        pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware, NULL);
-        pd.addsmallprimes = sclGetCLSoftware(addsmallprimes_cl,"addsmallprimes",hardware, NULL);
-	if(st.pmax < 0xFFFFFFFFFF000000){
-	        pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware, NULL);
-	}
-	else{
-	       	pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware, "-DCKOVERFLOW=1" );
-	}
+	// setup gpu work size
+	profileGPU(pd,st,sd,hardware);
 
 	// setup each k as part of a __constant kernel array
-	char *klist = generate_constant_array_string(sd.klist, sd.kcount, "klist");
+	char *klist = generate_constant_array_string(st.klist, st.kcount, "klist");
 
+	// build kernels
 	build_giant_kernels(pd, hardware, st, sd, klist);
 
+	// bake constants into setup kernel source, like giant kernels but added LS
 	char cldef[256];
 	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u -DLS=%u",
-		sd.hsize, sd.hsize-1, sd.Q, sd.m, sd.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base, (uint32_t)pd.giantparity.local_size[0]);
-	printf("%s\n",cldef);	
-
-	int total_len = strlen(setup_cl) + strlen(klist);
+		sd.hsize, sd.hsize-1, sd.Q, sd.m, st.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base, (uint32_t)pd.giantparity.local_size[0]);
+	int total_len = strlen(setup_cl) + strlen(klist) + 1;
 	char src_str[total_len];
 	snprintf(src_str, sizeof(src_str), "%s%s", klist, setup_cl);
-	pd.setup = sclGetCLSoftware(src_str,"setup",hardware, cldef);
+	pd.setup = sclGetCLSoftwareWithCommon(common_cl,src_str,"setup",hardware, cldef);
 
-	pd.sort = sclGetCLSoftware(sort_cl,"sort",hardware, cldef);
-
+	pd.sort = sclGetCLSoftwareWithCommon(common_cl,sort_cl,"sort",hardware, cldef);
+        pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware, NULL);
+        pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware, NULL);
+        pd.addsmallprimes = sclGetCLSoftwareWithCommon(common_cl,addsmallprimes_cl,"addsmallprimes",hardware, NULL);
+	if(st.pmax < 0xFFFFFFFFFF000000){
+	        pd.getsegprimes = sclGetCLSoftwareWithCommon(common_cl,getsegprimes_cl,"getsegprimes",hardware, NULL);
+	}
+	else{
+	       	pd.getsegprimes = sclGetCLSoftwareWithCommon(common_cl,getsegprimes_cl,"getsegprimes",hardware, "-DCKOVERFLOW=1" );
+	}
 	// kernel has __attribute__ ((reqd_work_group_size(256, 1, 1)))
 	// it's still possible the CL complier picked a different size
 	if(pd.getsegprimes.local_size[0] != 256){
@@ -977,6 +861,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		fprintf(stderr, "Set getsegprimes kernel local size to 256\n");
 	}
 
+	// resume from checkpoint or start new sieve
 	if( sd.test ){
 		// clear result file
 		FILE * temp_file = my_fopen(RESULTS_FILENAME,"w");
@@ -1013,32 +898,76 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 			}
 			fclose(temp_file);
 
-			// setup boinc trickle up
+			// setup boinc trickle up... trickle 1 day after starting.
 			st.last_trickle = (uint64_t)time(NULL);
 		}
 	}
 
-	profileGPU(pd,st,sd,hardware);
-
-	pd.d_k = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(kdata), NULL, &err);
+	// Allocate mem
+	// device -> host transfer arrays
+        pd.d_factor = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, sd.numresults*sizeof(factor), NULL, &err );
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clCreateBuffer failure: d_factor array.\n");
+                printf( "ERROR: clCreateBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	pd.d_primecount = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, 12*sizeof(cl_uint), NULL, &err );
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clCreateBuffer failure: d_primecount array.\n");
+                printf( "ERROR: clCreateBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	pd.d_bsgs_count = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, 3*sizeof(cl_uint), NULL, &err);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clCreateBuffer failure: d_bsgs_count array.\n");
+                printf( "ERROR: clCreateBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+        pd.d_sum = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, sizeof(cl_ulong), NULL, &err );
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clCreateBuffer failure: d_sum array.\n");
+                printf( "ERROR: clCreateBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	// map to host
+	cl_uint *h_primecount = (cl_uint*)clEnqueueMapBuffer(hardware.queue, pd.d_primecount, CL_FALSE, CL_MAP_READ, 0, 12*sizeof(cl_uint), 0, NULL, NULL, &err);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_primecount array.\n");
+                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	cl_uint *h_count = (cl_uint*)clEnqueueMapBuffer(hardware.queue, pd.d_bsgs_count, CL_FALSE, CL_MAP_READ, 0, 3*sizeof(cl_uint), 0, NULL, NULL, &err);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_count array.\n");
+                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	cl_ulong *h_sum = (cl_ulong*)clEnqueueMapBuffer(hardware.queue, pd.d_sum, CL_TRUE, CL_MAP_READ, 0, sizeof(cl_ulong), 0, NULL, NULL, &err);
+        if ( err != CL_SUCCESS ) {
+		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_sum.\n");
+                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
+		exit(EXIT_FAILURE);
+	}
+	// device arrays
+	pd.d_k = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*st.kcount*sizeof(kdata), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_k_full = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(kparity), NULL, &err);
+	pd.d_k_full = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*st.kcount*sizeof(kparity), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_k_even = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(kparity), NULL, &err);
+	pd.d_k_even = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*st.kcount*sizeof(kparity), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_k_odd = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*sd.kcount*sizeof(kparity), NULL, &err);
+	pd.d_k_odd = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*st.kcount*sizeof(kparity), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
                 printf( "ERROR: clCreateBuffer failure: hash table\n" );
@@ -1086,23 +1015,24 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_htable = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.primes_per_bsgs*sd.hsize*sizeof(cl_ulong), NULL, &err);
+	pd.d_htable = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.primes_per_bsgs*sd.hsize*sizeof(cl_uint), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	pd.d_hidx = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.primes_per_bsgs*sd.hsize*sizeof(cl_int), NULL, &err);
+	pd.d_hidx = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.primes_per_bsgs*sd.hsize*sizeof(cl_short), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
 
-uint64_t hh = sd.primes_per_bsgs*sd.hsize*sizeof(cl_ulong);
-hh += sd.primes_per_bsgs*sd.hsize*sizeof(cl_uint);
-hh /= 1000000;
-printf("hash table used %" PRIu64 " megabytes\n", hh );
+	uint64_t hh = sd.primes_per_bsgs*sd.hsize*sizeof(cl_uint);
+	hh += sd.primes_per_bsgs*sd.hsize*sizeof(cl_short);
+	hh /= 1000000;
+	printf("Hash table size %" PRIu64 " megabytes\n", hh );
+	fprintf(stderr, "Hash table size %" PRIu64 " megabytes\n", hh );
 
 	// setup global sizes
 	sclSetGlobalSize( pd.clearn, 64 );
@@ -1111,6 +1041,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 	sclSetGlobalSize( pd.setup, sd.psize );
 	sclSetGlobalSize( pd.sort, sd.psize );
 	sclSetGlobalSize( pd.clearresult, 64 );
+	// giant kernel global sizes are set real-time in main loop
 
 	// set static kernel args
 	sclSetKernelArg(pd.clearn, 0, sizeof(cl_mem), &pd.d_primecount);
@@ -1163,7 +1094,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 	}
 
 //	float kernel_ms;
-	cl_event launchEvent = NULL;
+//	cl_event launchEvent = NULL;
 	const double irsize = 1.0 / (double)(st.pmax-st.pmin);
 
 	sclEnqueueKernel(hardware, pd.clearresult);
@@ -1224,13 +1155,11 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 		sclSetKernelArg(pd.getsegprimes, 2, sizeof(int32_t), &wheelidx);
 		sclEnqueueKernel(hardware, pd.getsegprimes);
 
+		// setup sieve primes and do the power residue testing
 		sclEnqueueKernel(hardware, pd.setup);
-//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.setup);
-//		printf("setup kernel time %0.2fms\n",kernel_ms);
 
+		// sort the remaining primes by parity
 		sclEnqueueKernel(hardware, pd.sort);
-//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.sort);
-//		printf("sort kernel time %0.2fms\n",kernel_ms);
 
 		// get counters for BSGS kernels, non blocking
 		cl_event memTransfer = sclReadNBEvent(hardware, 3*sizeof(uint32_t), pd.d_bsgs_count, h_count);
@@ -1248,7 +1177,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 
 		// 3 different BSGS Kernels, 1 full range, 2 parity restricted
 		// loops limit runtime and device global memory hash table size
-		// parity = 1
+		// parity = 1 = full range N
 		for(ppos_start = ppos_end; ppos_start < h_count[0];){
 			ppos_end = ppos_start + sd.primes_per_bsgs;
 			if(ppos_end > h_count[0]) ppos_end = h_count[0];
@@ -1257,13 +1186,11 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 			sclSetKernelArg(pd.giantfull, 8, sizeof(uint32_t), &ppos_start);
 			sclSetGlobalSize( pd.giantfull, ppos_range * pd.giantfull.local_size[0] );	// 1 group per prime
 			sclEnqueueKernel(hardware, pd.giantfull);
-//			double kernel_ns = ProfilesclEnqueueKernelNS(hardware, pd.giantfull);
-//			printf("parity 1 giant kernel time %0.2f ns\n",kernel_ns);
 
 			ppos_start = ppos_end;
 		}
 
-		int parity = 2;
+		int parity = 2; // parity restricted to even N
 		ai = 0;
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primecount);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_factor);
@@ -1281,13 +1208,11 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 			sclSetKernelArg(pd.giantparity, 8, sizeof(uint32_t), &ppos_start);
 			sclSetGlobalSize( pd.giantparity, ppos_range * pd.giantparity.local_size[0] );	// 1 group per prime
 			sclEnqueueKernel(hardware, pd.giantparity);
-	//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);
-	//		printf("parity 2 giant kernel time %0.2fms\n",kernel_ms);
 
 			ppos_start = ppos_end;
 		}
 
-		parity = 3;
+		parity = 3; // parity restricted to odd N
 		ai = 0;
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_primecount);
 		sclSetKernelArg(pd.giantparity, ai++, sizeof(cl_mem), &pd.d_factor);
@@ -1305,8 +1230,6 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 			sclSetKernelArg(pd.giantparity, 8, sizeof(uint32_t), &ppos_start);
 			sclSetGlobalSize( pd.giantparity, ppos_range * pd.giantparity.local_size[0] );	// 1 group per prime
 			sclEnqueueKernel(hardware, pd.giantparity);
-	//		kernel_ms = ProfilesclEnqueueKernel(hardware, pd.giantparity);
-	//		printf("parity 3 giant kernel time %0.2fms\n",kernel_ms);
 
 			ppos_start = ppos_end;
 		}
@@ -1320,7 +1243,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 	boinc_begin_critical_section();
 	st.p = st.pmax;
 	boinc_fraction_done(1.0);
-	if(boinc_is_standalone()) printf("Sieve Progress: %.1f%%\n",100.0);
+	if(boinc_is_standalone()) printf("Sieve Progress: 100.0%%\n");
 	getResults(pd, st, sd, hardware, h_primecount, h_sum);
 	checkpoint(st, sd);
 	finalizeResults(st);
@@ -1335,7 +1258,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 		, st.factorcount, st.primecount, st.checksum, st.dupcount);
 	}
 
-	// free
+	// cleanup
 	err = clEnqueueUnmapMemObject(hardware.queue, pd.d_primecount, h_primecount, 0, NULL, NULL);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clEnqueueUnmapMemObject failure.\n");
@@ -1356,7 +1279,7 @@ printf("hash table used %" PRIu64 " megabytes\n", hh );
 	}
 	clFinish(hardware.queue);
 
-	free_sequences(sd);
+	free_sequences(sd, st);
 	cleanup(pd, sd, st);
 
 }

@@ -34,28 +34,6 @@
 #define __ctzl(_X) \
 	63u - clz(_X & -_X)
 
-ulong m_mul(ulong a, ulong b, ulong p, ulong q){
-	ulong lo = a*b;
-	ulong hi = mul_hi(a,b);
-	ulong m = lo * q;
-	ulong mp = mul_hi(m,p);
-	ulong r = hi - mp;
-	return ( hi < mp ) ? r + p : r;
-}
-
-ulong add(ulong a, ulong b, ulong p){
-	ulong r;
-	ulong c = (a >= p - b) ? p : 0;
-	r = a + b - c;
-	return r;
-}
-
-ulong invert(ulong p){
-	ulong p_inv = 1, prev = 0;
-	while (p_inv != prev) { prev = p_inv; p_inv *= 2 - p * p_inv; }
-	return p_inv;
-}
-
 bool strong_prp_two(ulong N, ulong q, ulong one, ulong two, ulong nmo){
 	int t = __ctzl( (N-1) );
 	ulong exp = N >> t;

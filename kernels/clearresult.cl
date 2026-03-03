@@ -6,7 +6,6 @@
 
 */
 
-
 __kernel void clearresult(__global uint *g_primecount, __global ulong *g_sum){
 
 	const uint gid = get_global_id(0);
