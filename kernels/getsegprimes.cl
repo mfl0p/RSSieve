@@ -179,14 +179,6 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulo
 			g_prime[ atomic_inc(&g_primecount[0]) ] = (ulong8)( p, q, one, two, nmo, 0, 0, 0 );
 		}
 	}
-
-	if(lid == 0){
-		// set flag to notify cpu of local memory overflow
-		if(count > 1900){
-			atomic_or(&g_primecount[4], 1);
-		}
-	}
-
 }
 
 

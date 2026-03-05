@@ -6,22 +6,16 @@
 
 */
 
-__kernel void clearn(__global uint *primecount, __global uint *bsgs_count){
+__kernel void clearn(__global uint *primecount){
 
 	const uint i = get_global_id(0);
 
 	if(i==0){
-		primecount[0]=0;
-		primecount[6]=0;
-		primecount[9]=0;
-		primecount[10]=0;
-
-		bsgs_count[0]=0;
-		bsgs_count[1]=0;
-		bsgs_count[2]=0;
+		primecount[0]=0;	// count from the prp generator
+		primecount[3]=0;	// count of full range primes
+		primecount[4]=0;	// count of even parity primes
+		primecount[5]=0;	// count of odd parity primes
 	}
-
-
 }
 
 

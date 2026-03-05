@@ -5,7 +5,7 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 0
-VERSION_MINOR := 15
+VERSION_MINOR := 17
 date := $(shell powershell.exe get-date -format FileDate)
 
 APP = RSSieve-win64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date).exe

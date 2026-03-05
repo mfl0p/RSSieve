@@ -207,7 +207,7 @@ __kernel void setup(	__global ulong8 * g_prime,
 	if(count[0] == KCOUNT){
 //		atomic_inc(&g_primecount[3]);
 		g_prime[gid].s0 = 0;
-		return;
+//		return;
 	}
 /*
 	// counters for testing

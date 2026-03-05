@@ -55,7 +55,6 @@ int hash_lookup(__global const uint *htable, __global const short *hidx, ulong v
 
 __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global uint * g_primecount,
-				__global uint * g_bsgs_count,
 				__global factor * g_factor,
 				__global const ulong8 * g_prime,
 				__global const kparity * g_k,
@@ -67,7 +66,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 	const int group = get_group_id(0);
 	const int primepos = start + group;
 	if(!start){	// first iteration of kernel could overflow
-		if(primepos >= g_bsgs_count[0]) return;
+		if(primepos >= g_primecount[3]) return;
 	}
 	const int lid = get_local_id(0);
 	const int ls = get_local_size(0);
@@ -76,7 +75,6 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 	const uint koffset = primepos*KCOUNT;
 	const uint hashoffset = group*HSIZE;
 	__local uint l_htable[HSIZE];
-	__local ulong l_k_hadj[KCOUNT];
 	const int numk = g_kcount[primepos];
 
 	// zero hash table
@@ -95,17 +93,12 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 		// gj * gj_inc mod P
 		gj = m_mul(gj, prime.s4, prime.s0, prime.s1);
 	}
-
-	// copy k data to local cache
-	if(lid < numk){
-		l_k_hadj[lid] = g_k[lid + koffset].hadj;
-	}
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
 	// giant steps
 	for(int q=lid; q<M; q+=ls){
 		for(int i=0; i<numk; ++i){
-			ulong gamma = m_mul(l_k_hadj[i], thread_gm_step, prime.s0, prime.s1);
+			ulong gamma = m_mul(g_k[koffset+i].hadj, thread_gm_step, prime.s0, prime.s1);
 			int r;
 			if(hash_lookup(g_htable, g_hidx, gamma, &r, hashoffset, l_htable)) {
 				int n = NMIN + q*Q + r;
@@ -140,7 +133,6 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 	const uint koffset = primepos*KCOUNT;
 	const uint hashoffset = group*HSIZE;
 	__local uint l_htable[HSIZE];
-	__local ulong l_k_hadj[KCOUNT];
 	const int numk = g_kcount[primepos];
 	const int nstart = (parity==3) ? NMIN+1 : NMIN;
 	const int threadInc = ls<<1;
@@ -162,11 +154,6 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 		// gj * gj_inc mod P
 		gj = m_mul(gj, prime.s4, prime.s0, prime.s1);
 	}
-
-	// copy k data to local cache
-	if(lid < numk){
-		l_k_hadj[lid] = g_k[lid + koffset].hadj;
-	}
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
 	ulong thread_gm_step = powmodsm(prime.s5, lid, prime.s0, prime.s1, prime.s2);
@@ -174,7 +161,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 	// giant steps
 	for(int q=lid; q<MM; q+=ls){
 		for(int i=0; i<numk; ++i){
-			ulong gamma = m_mul(l_k_hadj[i], thread_gm_step, prime.s0, prime.s1);
+			ulong gamma = m_mul(g_k[koffset+i].hadj, thread_gm_step, prime.s0, prime.s1);
 			int r;
 			if(hash_lookup(g_htable, g_hidx, gamma, &r, hashoffset, l_htable)) {
 				int n = nstart + q*QQ + r;
