@@ -19,11 +19,11 @@
 void hash_insert(__global uint *htable, __global short *hidx, ulong val, int idx, const uint offset, __local uint *ltable){
 	uint lo = (uint)val;
 	uint hi = (uint)(val >> 32);
-	uint pos = lo & MASK; // lo % HSIZE
+	uint pos = lo & MASK; 	// lo % HSIZE
 	while(true){
 		// Slot looks free, try to claim it
-		if(atomic_cmpxchg( (volatile __local uint *)&ltable[pos], 0, lo) == 0){
-			// We successfully claimed the slot and stored the lower 32 bits to local mem
+		if(atomic_cmpxchg(&ltable[pos], 0, lo) == 0){
+			// We successfully claimed the slot and stored lo to local mem
 			uint poff = pos+offset;
 			htable[poff] = hi;		// store the upper 32 bits in global mem
 			hidx[poff] = idx;		// store the index in global mem
@@ -39,19 +39,20 @@ int hash_lookup(__global const uint *htable, __global const short *hidx, ulong v
 	uint hi = (uint)(val >> 32);
 	uint pos = lo & MASK; // lo % HSIZE
 	uint start = pos;
-	while(ltable[pos] != 0){			// slot is used
-		if(ltable[pos] == lo){			// matched the lower 32 bits
+	for(uint entry = ltable[pos]; entry; entry = ltable[pos]){	// slot is used
+		if(entry == lo){ 
 			uint poff = pos+offset;
-			if(htable[poff] == hi) {	// check if the upper 32 bits also match
-				*idx_out = hidx[poff];	// use the index
+			if(htable[poff] == hi) {			// check if the upper 32 bits also match
+				*idx_out = hidx[poff];			// use the index
 				return 1;
 			}
 		}
-		pos = (pos + 1) & MASK;			// wrap around
-		if(pos == start) break;			// full cycle
+		pos = (pos + 1) & MASK;					// wrap around
+		if(pos == start) break;					// full cycle
 	}
 	return 0;
 }
+
 
 __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global uint * g_primecount,
@@ -76,7 +77,9 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 	const uint hashoffset = group*HSIZE;
 	__local uint l_htable[HSIZE];
 	const int numk = g_kcount[primepos];
-
+#if CACHEK
+	__local ulong l_k_hadj[KCOUNT];
+#endif
 	// zero hash table
 	for(int j=lid; j<HSIZE; j+=ls){
 		l_htable[j] = 0;
@@ -93,12 +96,21 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 		// gj * gj_inc mod P
 		gj = m_mul(gj, prime.s4, prime.s0, prime.s1);
 	}
+
+#if CACHEK
+	// copy k data to local cache
+	if(lid < numk) l_k_hadj[lid] = g_k[lid + koffset].hadj;
+#endif
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
 	// giant steps
 	for(int q=lid; q<M; q+=ls){
 		for(int i=0; i<numk; ++i){
+#if CACHEK
+			ulong gamma = m_mul(l_k_hadj[i], thread_gm_step, prime.s0, prime.s1);
+#else
 			ulong gamma = m_mul(g_k[koffset+i].hadj, thread_gm_step, prime.s0, prime.s1);
+#endif
 			int r;
 			if(hash_lookup(g_htable, g_hidx, gamma, &r, hashoffset, l_htable)) {
 				int n = NMIN + q*Q + r;
@@ -137,7 +149,9 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 	const int nstart = (parity==3) ? NMIN+1 : NMIN;
 	const int threadInc = ls<<1;
 	int threadj = lid<<1;
-
+#if CACHEK
+	__local ulong l_k_hadj[KCOUNT];
+#endif
 	// zero hash table
 	for(int j=lid; j<HSIZE; j+=ls){
 		l_htable[j] = 0;
@@ -154,6 +168,11 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 		// gj * gj_inc mod P
 		gj = m_mul(gj, prime.s4, prime.s0, prime.s1);
 	}
+
+#if CACHEK
+	// copy k data to local cache
+	if(lid < numk) l_k_hadj[lid] = g_k[lid + koffset].hadj;
+#endif
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
 	ulong thread_gm_step = powmodsm(prime.s5, lid, prime.s0, prime.s1, prime.s2);
@@ -161,7 +180,11 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 	// giant steps
 	for(int q=lid; q<MM; q+=ls){
 		for(int i=0; i<numk; ++i){
+#if CACHEK
+			ulong gamma = m_mul(l_k_hadj[i], thread_gm_step, prime.s0, prime.s1);
+#else
 			ulong gamma = m_mul(g_k[koffset+i].hadj, thread_gm_step, prime.s0, prime.s1);
+#endif
 			int r;
 			if(hash_lookup(g_htable, g_hidx, gamma, &r, hashoffset, l_htable)) {
 				int n = nstart + q*QQ + r;

@@ -33,7 +33,7 @@ typedef struct {
 } workStatus;
 
 typedef struct {
-	uint32_t computeunits, numresults, range, psize, Q, m, QQ, mm, hsize, lmemsize, primes_per_bsgs;
+	uint32_t computeunits, numresults, range, psize, Q, m, QQ, mm, hsize, lmemsize, primes_per_bsgs, cache_k;
 	bool test, write_state_a_next, nvidia;
 	Sequence sequences[MAX_SEQUENCES];
 	const char *input_file;

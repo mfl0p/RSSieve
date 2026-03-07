@@ -667,6 +667,12 @@ void setupSearch(workStatus & st, searchData & sd){
 
 	st.p = st.pmin;
 
+	// increase result buffer at low P range
+	// it's still possible to overflow this with a fast GPU and large search range
+	if(st.pmin < 0xFFFFFFFF){
+		sd.numresults *= 10;
+	}
+
 	fprintf(stderr, "Starting sieve at p: %" PRIu64 " n: %u\nStopping sieve at P: %" PRIu64 " N: %u\n", st.pmin, st.nmin, st.pmax, st.nmax);
 	if(boinc_is_standalone()){
 		printf("Starting sieve at p: %" PRIu64 " n: %u\nStopping sieve at P: %" PRIu64 " N: %u\n", st.pmin, st.nmin, st.pmax, st.nmax);
@@ -801,20 +807,46 @@ char* generate_constant_array_string(const int *arr, size_t n, const char *name)
 
 void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searchData & sd, char *klist){
 
-	sd.hsize = 8192;
-	sd.Q = 4096;
+	// for the BSGS sieve we want Q to be close to sqrt of search range L
+	// giant steps are more expensive than baby steps so Q > sqrt(L) is desired
+	// when range is > 16.7M, then Q is limited to 4096 due to available local mem
+	// power of 2 hash table size with 50% fill
+	uint32_t L = st.nmax - st.nmin + 1;
+	uint32_t targetQ = (uint32_t) ceil( sqrt((double)L) );
 
-	uint32_t lmem_to_allocate = sd.hsize * sizeof(cl_uint);
+	sd.Q = 1024;
+	sd.hsize = 2048;
 
-	if(sd.nvidia) lmem_to_allocate += 4; // driver reserves 4 bytes per __local array
-
-	if(lmem_to_allocate > sd.lmemsize){
-		fprintf(stderr,"ERROR: OpenCL device has insufficient local memory. Need %u bytes.\n", lmem_to_allocate);
-		printf("ERROR: OpenCL device has insufficient local memory. Need %u bytes.\n", lmem_to_allocate);
-		exit(EXIT_FAILURE);
+	while(sd.Q < 4096 && sd.Q < targetQ){
+		sd.Q <<= 1;
+		sd.hsize <<= 1;
 	}
 
-	uint32_t L = st.nmax - st.nmin + 1;
+	uint32_t lmem_to_allocate = sd.hsize * sizeof(cl_uint);
+	if(sd.nvidia) lmem_to_allocate += 4; // driver reserves 4 bytes per __local array
+
+	// adjust if target Q is too big for gpu
+	while(lmem_to_allocate > sd.lmemsize){
+		sd.Q >>= 1;
+		sd.hsize >>= 1;
+		if(sd.Q < 512){
+			fprintf(stderr,"ERROR: OpenCL device has insufficient local memory.\n");
+			printf("ERROR: OpenCL device has insufficient local memory.\n");
+			exit(EXIT_FAILURE);
+		}
+		lmem_to_allocate = sd.hsize * sizeof(cl_uint);
+		if(sd.nvidia) lmem_to_allocate += 4; // driver reserves 4 bytes per __local array
+	}
+
+	// see if there is room to cache the K data in lmem
+	sd.cache_k = 0;
+	uint32_t lmem_for_k = st.kcount * sizeof(cl_ulong);
+	if(sd.nvidia) lmem_for_k += 4; // driver reserves 4 bytes per __local array
+	if(lmem_to_allocate + lmem_for_k <= sd.lmemsize){
+		sd.cache_k = 1;
+	}
+
+	// m are the giant steps
 	sd.m = (uint32_t) ceil((double)L / sd.Q);
 
 	// for parity restricted P
@@ -823,8 +855,8 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 
 	// bake constants into kernel source
 	char cldef[256];
-	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u",
-		sd.hsize, sd.hsize-1, sd.Q, sd.m, st.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base);
+	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u -DCACHEK=%u",
+		sd.hsize, sd.hsize-1, sd.Q, sd.m, st.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base, sd.cache_k);
 
 	int total_len = strlen(giant_cl) + strlen(klist) + 1;
 	char src_str[total_len];
@@ -1066,8 +1098,8 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	hh += sd.primes_per_bsgs*sd.hsize*sizeof(cl_short);
 	hh /= 1000000;
 
-	printf("LS:%zu LMEM:%u HT:%u\n",pd.giantfull.local_size[0],(uint32_t)kernel_local_mem,(uint32_t)hh);
-	fprintf(stderr,"LS:%zu LMEM:%u HT:%u\n",pd.giantfull.local_size[0],(uint32_t)kernel_local_mem,(uint32_t)hh);
+	printf("Q:%u CK:%u LS:%zu LM:%u HT:%u\n",sd.Q,sd.cache_k,pd.giantfull.local_size[0],(uint32_t)kernel_local_mem,(uint32_t)hh);
+	fprintf(stderr,"Q:%u CK:%u LS:%zu LM:%u HT:%u\n",sd.Q,sd.cache_k,pd.giantfull.local_size[0],(uint32_t)kernel_local_mem,(uint32_t)hh);
 
 	// setup global sizes
 	sclSetGlobalSize( pd.clearn, 64 );

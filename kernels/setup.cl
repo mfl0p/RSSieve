@@ -157,7 +157,6 @@ __kernel void setup(	__global ulong8 * g_prime,
 	ulong one = m_mul(prefix[KCOUNT], inv_total, prime.s0, prime.s1);
 	if(one != prime.s2){
 		// inverse doesn't exist, we can skip this 2-prp
-		atomic_inc(&g_primecount[3]);
 		g_prime[gid].s0 = 0;
 		return;
 	}
@@ -205,25 +204,8 @@ __kernel void setup(	__global ulong8 * g_prime,
 
 	// we can skip this p if all k have no solutions
 	if(count[0] == KCOUNT){
-//		atomic_inc(&g_primecount[3]);
 		g_prime[gid].s0 = 0;
-//		return;
 	}
-/*
-	// counters for testing
-	if(count[0]){		// skipped
-		atomic_add(&g_primecount[5],count[0]);
-	}
-	if(count[1]){		// reg
-		atomic_add(&g_primecount[11],count[1]);
-	}
-	if(count[2]){		// even
-		atomic_add(&g_primecount[7],count[2]);
-	}
-	if(count[3]){		// odd
-		atomic_add(&g_primecount[8],count[3]);
-	}
-*/
 }
 
 
