@@ -15,7 +15,7 @@ With contributions by
 
 ## How it works
 
-1. Search parameters are given on the command line and input sr2sieve style ABCD file.
+1. Search parameters are given on the command line and input sr2sieve/sr5sieve style ABCD file.
 2. A small group of sieve primes are generated on the GPU.
 3. The group of primes are tested for factors using the BSGS algorithm.
 4. Repeat #2-3 until checkpoint.  Gather and verify factors from GPU.
