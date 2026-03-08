@@ -5,13 +5,15 @@
 	the baby-step-giant-step algorithm in local memory
 
 	testing shows optimal hash table size is 8192 with 4096 elements inserted.
-	nvidia gpus usually expose 49152 bytes of lmem to the kernels.
+	nvidia gpus usually expose 49152 bytes of lmem to the kernels, AMD can be 32768 bytes.
 	since we cannot partition the L1/lmem in OpenCL like CUDA, we have to get creative making the hash table fit.
 	we store the upper 32 bits of the value and the index to global memory.
 	the lower 32 bits are stored to local memory for fast atomic setup and lookup.
 	we check the hi 32 bits in global memory only if the lower 32 bits match.
-	if the hi bits match, we have a solution and can use the index stored global memory.
-	upper 32 bits are needed as we expect a large amount of collisions during the giant steps. 
+	if the hi bits match, we have a solution and can use the index stored in global memory.
+	the cluster of hash table entries will be checked for duplicates.  
+	the index for all duplicate hash table entries (up to 8) will be returned.
+	note that duplicates will be very rare when p > 2^32.
 	testing on rtx 5090 shows performance is about 97% of storing the entire 64 bit values in partitioned lmem.
 
 */
@@ -19,40 +21,38 @@
 void hash_insert(__global uint *htable, __global short *hidx, ulong val, int idx, const uint offset, __local uint *ltable){
 	uint lo = (uint)val;
 	uint hi = (uint)(val >> 32);
-	uint pos = lo & MASK; 	// lo % HSIZE
+	uint pos = lo & MASK; 						// lo % HSIZE
 	while(true){
-		// Slot looks free, try to claim it
-		if(atomic_cmpxchg(&ltable[pos], 0, lo) == 0){
+		if( atomic_cmpxchg(&ltable[pos], 0, lo) == 0 ){		// Slot looks free, try to claim it
 			// We successfully claimed the slot and stored lo to local mem
 			uint poff = pos+offset;
-			htable[poff] = hi;		// store the upper 32 bits in global mem
-			hidx[poff] = idx;		// store the index in global mem
+			htable[poff] = hi;				// store the upper 32 bits in global mem
+			hidx[poff] = idx;				// store the index in global mem
 			return;
 		}
 		// Lost the race. keep probing
-		pos = (pos + 1) & MASK;			// wrap around
+		pos = (pos + 1) & MASK;					// wrap around
 	}
 }
 
-int hash_lookup(__global const uint *htable, __global const short *hidx, ulong val, int *idx_out, const uint offset, __local const uint *ltable) {
+int hash_lookup_all(__global const uint *htable, __global const short *hidx, ulong val, short *out_idx, const uint offset, __local const uint *ltable){
 	uint lo = (uint)val;
 	uint hi = (uint)(val >> 32);
-	uint pos = lo & MASK; // lo % HSIZE
+	uint pos = lo & MASK; 						// lo % HSIZE
 	uint start = pos;
+	int count = 0;
 	for(uint entry = ltable[pos]; entry; entry = ltable[pos]){	// slot is used
-		if(entry == lo){ 
-			uint poff = pos+offset;
-			if(htable[poff] == hi) {			// check if the upper 32 bits also match
-				*idx_out = hidx[poff];			// use the index
-				return 1;
+		if(entry == lo){
+			uint poff = pos + offset;
+			if(htable[poff] == hi){				// check if the upper 32 bits also match
+				if(count < 8) out_idx[count++] = hidx[poff];
 			}
 		}
 		pos = (pos + 1) & MASK;					// wrap around
 		if(pos == start) break;					// full cycle
 	}
-	return 0;
+	return count;
 }
-
 
 __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 				__global uint * g_primecount,
@@ -111,9 +111,10 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 #else
 			ulong gamma = m_mul(g_k[koffset+i].hadj, thread_gm_step, prime.s0, prime.s1);
 #endif
-			int r;
-			if(hash_lookup(g_htable, g_hidx, gamma, &r, hashoffset, l_htable)) {
-				int n = NMIN + q*Q + r;
+			short rs[8];
+			int rcnt = hash_lookup_all(g_htable, g_hidx, gamma, rs, hashoffset, l_htable);
+			for(int t = 0; t < rcnt; ++t){
+				int n = NMIN + q*Q + rs[t];
 				if(n <= NMAX) {
 					uint f = atomic_inc(&g_primecount[2]);
 					factor fac = {prime.s0, n, klist[g_k[i + koffset].kidx]};
@@ -185,9 +186,10 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 #else
 			ulong gamma = m_mul(g_k[koffset+i].hadj, thread_gm_step, prime.s0, prime.s1);
 #endif
-			int r;
-			if(hash_lookup(g_htable, g_hidx, gamma, &r, hashoffset, l_htable)) {
-				int n = nstart + q*QQ + r;
+			short rs[8];
+			int rcnt = hash_lookup_all(g_htable, g_hidx, gamma, rs, hashoffset, l_htable);
+			for(int t = 0; t < rcnt; ++t){
+				int n = nstart + q*QQ + rs[t];
 				if(n <= NMAX) {
 					uint f = atomic_inc(&g_primecount[2]);
 					factor fac = {prime.s0, n, klist[g_k[i + koffset].kidx]};

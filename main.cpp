@@ -25,7 +25,7 @@ void help()
 	printf("Program usage:\n");
 	printf("-p #			Starting prime factor p\n");
 	printf("-P #			End prime factor P\n");
-	printf("			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive\n");
+	printf("			P range is 2^32 <= -p < -P < 2^64, [-p, -P) exclusive\n");
 	printf("-i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences\n");
 	printf("-h			Print this help\n");
         boinc_finish(EXIT_FAILURE);
@@ -88,14 +88,16 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
     while (token) {
 	if (strcmp(token, "-p") == 0) {
             token = strtok(NULL, " \t");
-            if (token && parse_uint64(&st->pmin, token, 1, 0xFFFFFFFFFFFFFFFFULL) != 0) {
+            if (token && parse_uint64(&st->pmin, token, 0x100000000ULL, 0xFFFFFFFFFFFFFFFFULL) != 0) {
                 fprintf(stderr, "Invalid value for -p: %s\n", token);
+		printf("Invalid value for -p: %s\n", token);
             }
         }
         else if (strcmp(token, "-P") == 0) {
             token = strtok(NULL, " \t");
-            if (token && parse_uint64(&st->pmax, token, 1, 0xFFFFFFFFFFFFFFFFULL) != 0) {
+            if (token && parse_uint64(&st->pmax, token, 0x100000000ULL, 0xFFFFFFFFFFFFFFFFULL) != 0) {
                 fprintf(stderr, "Invalid value for -P: %s\n", token);
+		printf("Invalid value for -P: %s\n", token);
             }
         }
 	else if (strcmp(token, "-i") == 0) {

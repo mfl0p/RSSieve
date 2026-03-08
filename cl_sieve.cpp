@@ -667,12 +667,6 @@ void setupSearch(workStatus & st, searchData & sd){
 
 	st.p = st.pmin;
 
-	// increase result buffer at low P range
-	// it's still possible to overflow this with a fast GPU and large search range
-	if(st.pmin < 0xFFFFFFFF){
-		sd.numresults *= 10;
-	}
-
 	fprintf(stderr, "Starting sieve at p: %" PRIu64 " n: %u\nStopping sieve at P: %" PRIu64 " N: %u\n", st.pmin, st.nmin, st.pmax, st.nmax);
 	if(boinc_is_standalone()){
 		printf("Starting sieve at p: %" PRIu64 " n: %u\nStopping sieve at P: %" PRIu64 " N: %u\n", st.pmin, st.nmin, st.pmax, st.nmax);

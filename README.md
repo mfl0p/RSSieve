@@ -2,7 +2,7 @@
 
 RSSieve by Bryan Little
 
-A BOINC enabled OpenCL standalone Riesel Sierpinski Sieve for multiple sequences k*b^n+-1 using the BSGS algorithm.
+A BOINC enabled OpenCL Riesel Sierpinski Sieve for multiple sequences k*b^n+-1 using the BSGS algorithm.
 
 With contributions by
 * Geoffrey Reynolds
@@ -26,7 +26,7 @@ With contributions by
 command line options
 * -p #			Starting prime factor p
 * -P #			End prime factor P
-* 			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive
+* 			P range is 2^32 <= -p < -P < 2^64, [-p, -P) exclusive
 * -i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences
 * -h			Print help
 
