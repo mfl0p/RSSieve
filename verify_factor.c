@@ -164,17 +164,14 @@ int verify_factor(uint64_t p, uint64_t k, uint32_t n, int32_t c, uint32_t base){
 		curBit >>= 1;
 	}
 
-	// convert k to montgomery form
-	uint64_t Km = m_mul(k,r2,p,q);
- 
-	// b = k*base^n mod P
-	uint64_t b = m_mul(a,Km,p,q);
+	// a = k*base^n mod P, not in montgomery form
+	a = m_mul(a,k,p,q);
 
-	if(b == one && c == -1){
+	if(a == 1 && c == -1){
 //		printf("%" PRIu64 " is a factor of %" PRIu64 "*%u^%u-1\n",p,k,base,n);
 		return 1;
 	}
-	else if(b == pmo && c == 1){
+	else if(a == p-1 && c == 1){
 //		printf("%" PRIu64 " is a factor of %" PRIu64 "*%u^%u+1\n",p,k,base,n);
 		return 1;
 	}

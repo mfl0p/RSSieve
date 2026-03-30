@@ -47,7 +47,7 @@ typedef struct {
 	cl_mem d_k, d_k_full, d_k_even, d_k_odd;
 	cl_mem d_kcount_full, d_kcount_even, d_kcount_odd;
 	cl_mem d_bsgs_count;
-	sclSoft setup, sort, clearn, clearresult, getsegprimes, addsmallprimes, giantparity, giantfull;
+	sclSoft setup, sort, clearn, clearresult, getsegprimes, giantparity, giantfull;
 } progData;
 
 void cl_sieve( sclHard hardware, workStatus & st, searchData & sd );

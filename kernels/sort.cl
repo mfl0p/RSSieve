@@ -40,6 +40,7 @@ __kernel void sort(	__global uint * g_primecount,
 	uint kpos = gid*KCOUNT;
 	for(int i=0; i<KCOUNT; ++i){
 		kdata thek = g_k[kpos++];
+		kparity kout = {thek.hadj, thek.kidx};
 		if(!thek.parity){
 			break;	// done
 		}
@@ -48,7 +49,6 @@ __kernel void sort(	__global uint * g_primecount,
 				primepos_full = atomic_inc(&g_primecount[3]);
 				kpos_full = primepos_full*KCOUNT;
 			}
-			kparity kout = {thek.hadj, thek.kidx};
 			g_k_full[kpos_full++] = kout;
 			++kf;
 		}
@@ -57,7 +57,6 @@ __kernel void sort(	__global uint * g_primecount,
 				primepos_even = atomic_inc(&g_primecount[4]);
 				kpos_even = primepos_even*KCOUNT;
 			}
-			kparity kout = {thek.hadj, thek.kidx};
 			g_k_even[kpos_even++] = kout;
 			++ke;
 		}
@@ -66,7 +65,6 @@ __kernel void sort(	__global uint * g_primecount,
 				primepos_odd = atomic_inc(&g_primecount[5]);
 				kpos_odd = primepos_odd*KCOUNT;
 			}
-			kparity kout = {thek.hadj, thek.kidx};
 			g_k_odd[kpos_odd++] = kout;
 			++ko;
 		}
@@ -75,7 +73,7 @@ __kernel void sort(	__global uint * g_primecount,
 	ulong gj_start = basepowmodsm(prime.s3, NMIN, prime.s0, prime.s1, prime.s2);	// base^NMIN, NMIN is even
 	ulong gj_inc, gQ_step_inc;
 
-	// dual powmod, base^lid and gQ_inv^lid
+	// dual powmod, base^(localsize of giant kernel) and gQ_inv^(localsize of giant kernel)
 	dualbasepowmodsm(prime.s3, prime.s5, LS, prime.s0, prime.s1, prime.s2, &gj_inc, &gQ_step_inc);
 
 	ulong gjj_inc, gQQ_step_inc, gQQ_inv;

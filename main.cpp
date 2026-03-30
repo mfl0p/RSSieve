@@ -7,7 +7,14 @@
 	Required minimum OpenCL version is 1.1
 	CL_TARGET_OPENCL_VERSION 110 in simpleCL.h
 
-	Search limits:  P up to 2^64 and N up to 2^31
+	Search limits:  P from 2^32 up to 2^64 and N up to 2^31
+
+	An input file in sr2sieve/sr5sieve ABCD format is required.
+
+	P can be extended lower than 2^32 but will require handling:
+	* a very large amount of factors
+	* excessive hash table collisions/duplicates that occur with small modulus
+	It's better to use sr2sieve/sr5sieve below 2^32.
 */
 
 #include <unistd.h>

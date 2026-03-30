@@ -15,7 +15,7 @@ With contributions by
 
 ## How it works
 
-1. Search parameters are given on the command line and input sr2sieve style ABCD file.
+1. Search parameters are given on the command line and input sr2sieve/sr5sieve style ABCD file.
 2. A small group of sieve primes are generated on the GPU.
 3. The group of primes are tested for factors using the BSGS algorithm.
 4. Repeat #2-3 until checkpoint.  Gather and verify factors from GPU.
@@ -29,6 +29,8 @@ command line options
 * 			P range is 2^32 <= -p < -P < 2^64, [-p, -P) exclusive
 * -i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences
 * -h			Print help
+
+Note that you will need to use sr2sieve/sr5sieve for P below 2^32.
 
 Program gets the OpenCL GPU device index from BOINC.  To run stand-alone, the program will
 default to GPU 0 unless an init_data.xml is in the same directory with the format:

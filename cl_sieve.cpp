@@ -7,7 +7,14 @@
 	Required minimum OpenCL version is 1.1
 	CL_TARGET_OPENCL_VERSION 110 in simpleCL.h
 
-	Search limits:  P up to 2^64 and N up to 2^31
+	Search limits:  P from 2^32 up to 2^64 and N up to 2^31
+
+	An input file in sr2sieve/sr5sieve ABCD format is required.
+
+	P can be extended lower than 2^32 but will require handling:
+	* a very large amount of factors
+	* excessive hash table collisions/duplicates that occur with small modulus
+	It's better to use sr2sieve/sr5sieve below 2^32.
 */
 
 #include <unistd.h>
@@ -22,7 +29,6 @@
 #include "clearn.h"
 #include "clearresult.h"
 #include "getsegprimes.h"
-#include "addsmallprimes.h"
 #include "setup.h"
 #include "giant.h"
 #include "sort.h"
@@ -154,7 +160,6 @@ void cleanup( progData & pd, searchData & sd, workStatus & st ){
 	sclReleaseClSoft(pd.clearn);
 	sclReleaseClSoft(pd.clearresult);
         sclReleaseClSoft(pd.getsegprimes);
-        sclReleaseClSoft(pd.addsmallprimes);
 	sclReleaseClSoft(pd.setup);
 	sclReleaseClSoft(pd.sort);
 	sclReleaseClSoft(pd.giantparity);
@@ -510,8 +515,10 @@ int factorcompare(const void *a, const void *b) {
 
 void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardware, cl_uint * h_primecount, cl_ulong * h_sum ){
 
-	printf("\r                                                                                \r");
-	fflush(stdout);
+	if(boinc_is_standalone()){
+		printf("\r                                                                                \r");
+		fflush(stdout);
+	}
 
 	// copy total prime count to host memory, non-blocking
 	sclReadNB(hardware, sizeof(cl_ulong), pd.d_sum, h_sum);
@@ -527,6 +534,8 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 		exit(EXIT_FAILURE);
 	}
 /*
+	// for testing.  atomic adds will have to be added back into setup kernel for this to work.
+
 	double totalk = ((double)*h_sum - (double)h_primecount[3]) * (double)st.kcount;
 	double skipped = (double)h_primecount[5] / totalk * 100.0;
 	double full = (double)h_primecount[11] / totalk * 100.0;
@@ -562,29 +571,9 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			qsort(h_factor, numfactors, sizeof(factor), factorcompare);
 		}
 
-		// verify all factors on CPU
-		printf("Verifying %u factors on CPU...\n", numfactors);
+		if(boinc_is_standalone()) printf("Verifying %u factors on CPU...\n", numfactors);
+
 		uint32_t prpcount = 0;
-		for(uint32_t i=0; i<numfactors; ++i){
-			uint64_t fp = h_factor[i].p;
-			uint32_t fn = h_factor[i].n;
-			uint32_t fk = (h_factor[i].k < 0) ? -h_factor[i].k : h_factor[i].k;
-			int32_t fc = (h_factor[i].k < 0) ? -1 : 1;
-			int32_t vres = verify_factor( fp, fk, fn, fc, st.base); 
-			if( !vres ){
-				fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
-				printf("CPU factor verification failed!  %" PRIu64 " is not a factor of %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
-				exit(EXIT_FAILURE);
-			}
-			else if( vres == -1 ){		// Unlikely
-				h_factor[i].p = 0;
-				++prpcount;
-			}
-		}
-
-		fprintf(stderr,"Verified %u factors.\n", numfactors-prpcount);
-		printf("Verified %u factors.\n", numfactors-prpcount);
-
 		FILE * resfile = NULL;
 		for(uint32_t i=0; i<numfactors; ++i){
 			uint64_t fp = h_factor[i].p;
@@ -592,7 +581,16 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			uint32_t fk = (h_factor[i].k < 0) ? -h_factor[i].k : h_factor[i].k;
 			int32_t fc = (h_factor[i].k < 0) ? -1 : 1;
 			char sign = (h_factor[i].k < 0) ? '-' : '+';
-			if(fp){
+			int32_t vres = verify_factor( fp, fk, fn, fc, st.base); 
+			if( !vres ){
+				fprintf(stderr,"CPU factor verification failed!  %" PRIu64 " is not a factor of %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
+				printf("CPU factor verification failed!  %" PRIu64 " is not a factor of %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
+				exit(EXIT_FAILURE);
+			}
+			else if( vres == -1 ){		// Unlikely, factor is a 2-prp
+				++prpcount;
+			}
+			else{
  				if( factor_can_be_used(sd.sequences, st.kcount, fk, sign, fn) ){
 					mark_factor_used(sd.sequences, st.kcount, fk, sign, fn);
 					++st.factorcount;
@@ -615,14 +613,19 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 //					fprintf(stderr, "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
 //					printf( "duplicate factor: %" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc);
 				}
-				// add the factor to checksum
+				// add the factor to checksum, even if it is a duplicate
 				st.checksum += fp + fk + fn + fc;
 			}
 		}
+
 		if(resfile != NULL){
 			fclose(resfile);
 		}
 		free(h_factor);
+
+		fprintf(stderr,"Verified %u factors.\n", numfactors-prpcount);
+		if(boinc_is_standalone()) printf("Verified %u factors.\n", numfactors-prpcount);
+
 	}
 
 	checkpoint(st, sd);
@@ -675,6 +678,7 @@ void setupSearch(workStatus & st, searchData & sd){
 }
 
 // calculate approximate work chunk size based on gpu's compute units
+// target 256*CU to keep gpu busy during setup and sort kernels
 void profileGPU(progData & pd, workStatus & st, searchData & sd, sclHard hardware){
 
 	uint64_t start = st.p;
@@ -805,6 +809,8 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 	// giant steps are more expensive than baby steps so Q > sqrt(L) is desired
 	// when range is > 16.7M, then Q is limited to 4096 due to available local mem
 	// power of 2 hash table size with 50% fill
+	// note that for parity restricted k/p combinations, Q is effectively 2*Q
+	// therefore optimal parity resticted range L can be up to 67M
 	uint32_t L = st.nmax - st.nmin + 1;
 	uint32_t targetQ = (uint32_t) ceil( sqrt((double)L) );
 
@@ -844,7 +850,10 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 	sd.m = (uint32_t) ceil((double)L / sd.Q);
 
 	// for parity restricted P
+	// hash table can fit 2*Q since it only stores even or odd N
 	sd.QQ = sd.Q<<1;
+
+	// mm are the parity restricted giant steps
 	sd.mm = (uint32_t) ceil((double)L / sd.QQ);
 
 	// bake constants into kernel source
@@ -910,7 +919,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	pd.sort = sclGetCLSoftwareWithCommon(common_cl,sort_cl,"sort",hardware, cldef);
         pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware, NULL);
         pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware, NULL);
-        pd.addsmallprimes = sclGetCLSoftwareWithCommon(common_cl,addsmallprimes_cl,"addsmallprimes",hardware, NULL);
 	if(st.pmax < 0xFFFFFFFFFF000000){
 	        pd.getsegprimes = sclGetCLSoftwareWithCommon(common_cl,getsegprimes_cl,"getsegprimes",hardware, NULL);
 	}
@@ -1098,7 +1106,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	// setup global sizes
 	sclSetGlobalSize( pd.clearn, 64 );
 	sclSetGlobalSize( pd.getsegprimes, (sd.range/60)+1 );
-	sclSetGlobalSize( pd.addsmallprimes, 64 );
 	sclSetGlobalSize( pd.setup, sd.psize );
 	sclSetGlobalSize( pd.sort, sd.psize );
 	sclSetGlobalSize( pd.clearresult, 64 );
@@ -1113,11 +1120,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetKernelArg(pd.getsegprimes, 3, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.getsegprimes, 4, sizeof(cl_mem), &pd.d_primecount);
 
-	sclSetKernelArg(pd.addsmallprimes, 2, sizeof(cl_mem), &pd.d_primes);
-	sclSetKernelArg(pd.addsmallprimes, 3, sizeof(cl_mem), &pd.d_primecount);
-
 	int ai = 0;
-	ai = 0;
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primecount);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_k);
@@ -1156,7 +1159,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	double smooth_rate = 0;
 
 //	float kernel_ms;
-//	cl_event launchEvent = NULL;
 	const double irsize = 1.0 / (double)(st.pmax-st.pmin);
 
 	sclEnqueueKernel(hardware, pd.clearresult);
@@ -1178,15 +1180,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		// clear prime count
 		sclEnqueueKernel(hardware, pd.clearn);
 		
-		// test small primes that cannot be generated with getsegprimes kernel
-		if(st.p < 114){
-			uint64_t stop_sm = (stop > 114) ? 114 : stop;
-			sclSetKernelArg(pd.addsmallprimes, 0, sizeof(uint64_t), &st.p);
-			sclSetKernelArg(pd.addsmallprimes, 1, sizeof(uint64_t), &stop_sm);
-			sclEnqueueKernel(hardware, pd.addsmallprimes);
-			st.p = stop_sm;
-		}
-
 		// get a segment of primes (2-PRPs)
 		int32_t wheelidx;
 		uint64_t kernel_start = st.p;
