@@ -13,6 +13,7 @@ __kernel void clearresult(__global uint *g_primecount, __global ulong *g_sum){
 	if(gid == 0){
 		g_primecount[1] = 0;	// largest kernel prime count, for overflow checking
 		g_primecount[2] = 0;	// # of factors found
+		g_primecount[6] = 0;	// # of duplicate factors found
 
 		g_sum[0] = 0;		// total primecount between checkpoints  
 	}

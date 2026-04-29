@@ -1,10 +1,5 @@
 //
-// Even closer to sr5sieve behavior, with extra strictness:
-//  - filename + line number on ALL errors
-//  - includes current sequence index (when known) in relevant errors
-//  - detects and errors on uint32_t overflow when accumulating n += delta
-//  - detects and errors on overflow when computing lastN = N0 + sum(deltas)
-//  - validates K,B,N0 are nonzero-ish where sensible (B>=2, K>=1, N0>=1)
+// sr5sieve-style ABCD reader using one large uint32_t bitmap array.
 //
 // Parsing rules:
 //  - Ignore blank lines and comment lines (# as first non-whitespace char)
@@ -17,9 +12,14 @@
 //  - B must be the same for all sequences
 //  - Any other non-empty/non-comment line is a hard error
 //
-// Output:
-//  - Builds seq bitmap bits for exactly the N values present in the file
-//  - Sets st.base, st.nmin, st.nmax (and if nmin odd => nmin--)
+// Bitmap layout:
+//  - sd.bitmap is one large uint32_t array.
+//  - Every sequence has the same logical N range: st.nmin..st.nmax.
+//  - st.nmin is the smallest N read from all sequences, reduced by 1 if odd.
+//  - Sequence i starts at: i * sd.bitmap_words_per_sequence.
+//  - Bit for N is: (N - st.nmin).
+//  - Only N values read from the file are set. All other positions stay zero.
+//
 
 #include <cstdio>
 #include <cstdlib>
@@ -33,66 +33,92 @@
 #include "cl_sieve.h"
 
 // -----------------------------------------------------------------------------
-// Bitmap helpers + factor usage helpers
+// One-large-array uint32_t bitmap helpers + factor usage helpers
 // -----------------------------------------------------------------------------
 
-static uint8_t* init_bitmap_empty(size_t nbits) {
-    size_t nbytes = (nbits + 7) / 8;
-    uint8_t *bm = (uint8_t*)std::malloc(nbytes);
-    if (!bm) { std::perror("malloc"); std::exit(EXIT_FAILURE); }
-    std::memset(bm, 0, nbytes);
+static uint32_t* init_bitmap_words_zero(size_t nwords) {
+    if (nwords == 0) return nullptr;
+
+    if (nwords > ((size_t)-1) / sizeof(uint32_t)) {
+        std::fprintf(stderr, "bitmap allocation overflow\n");
+        std::exit(EXIT_FAILURE);
+    }
+
+    uint32_t *bm = (uint32_t*)std::calloc(nwords, sizeof(uint32_t));
+    if (!bm) { std::perror("calloc"); std::exit(EXIT_FAILURE); }
     return bm;
 }
 
-static inline void set_can_use(uint8_t *bitmap, size_t offset) {
-    bitmap[offset / 8] |= (uint8_t)(1u << (offset % 8));
+static inline size_t bitmap_seq_base_word(const searchData &sd, uint32_t seqno) {
+    return (size_t)seqno * sd.bitmap_words_per_sequence;
 }
 
-static inline void clear_can_use(uint8_t *bitmap, size_t offset) {
-    bitmap[offset / 8] &= (uint8_t)~(1u << (offset % 8));
+static inline void set_can_use(searchData &sd, const workStatus &st, uint32_t seqno, uint32_t n) {
+    if (!sd.bitmap) return;
+    if (n < st.nmin || n > st.nmax) return;
+
+    const size_t bit_offset = (size_t)((uint64_t)n - (uint64_t)st.nmin);
+    const size_t word_index = bitmap_seq_base_word(sd, seqno) + (bit_offset >> 5);
+    const uint32_t mask = UINT32_C(1) << (bit_offset & 31u);
+
+    sd.bitmap[word_index] |= mask;
 }
 
-static int can_use_N(const Sequence *seq, uint32_t n) {
-    if (n < seq->N0 || n > seq->lastN) return 0;
-    size_t offset = (size_t)(n - seq->N0);
-    if (offset >= seq->nbits) return 0;
-    return (seq->bitmap[offset / 8] >> (offset % 8)) & 1;
+static inline void clear_can_use(searchData &sd, const workStatus &st, uint32_t seqno, uint32_t n) {
+    if (!sd.bitmap) return;
+    if (n < st.nmin || n > st.nmax) return;
+
+    const size_t bit_offset = (size_t)((uint64_t)n - (uint64_t)st.nmin);
+    const size_t word_index = bitmap_seq_base_word(sd, seqno) + (bit_offset >> 5);
+    const uint32_t mask = UINT32_C(1) << (bit_offset & 31u);
+
+    sd.bitmap[word_index] &= ~mask;
 }
 
-static void mark_N_used(Sequence *seq, uint32_t n) {
-    if (n < seq->N0 || n > seq->lastN) return;
-    size_t offset = (size_t)(n - seq->N0);
-    if (offset >= seq->nbits) return;
-    clear_can_use(seq->bitmap, offset);
+static inline int can_use_N(const searchData &sd, const workStatus &st, uint32_t seqno, uint32_t n) {
+    if (!sd.bitmap) return 0;
+    if (n < st.nmin || n > st.nmax) return 0;
+
+    const size_t bit_offset = (size_t)((uint64_t)n - (uint64_t)st.nmin);
+    const size_t word_index = bitmap_seq_base_word(sd, seqno) + (bit_offset >> 5);
+    const uint32_t mask = UINT32_C(1) << (bit_offset & 31u);
+
+    return (sd.bitmap[word_index] & mask) != 0;
 }
 
-static int find_sequence(const Sequence *sequences, size_t count, uint32_t K, char sign) {
-    for (size_t i = 0; i < count; i++) {
-        if (sequences[i].K == K && sequences[i].sign == sign) return (int)i;
+static int find_sequence(const workStatus &st, uint32_t K, char sign) {
+    const int signed_k = (sign == '+') ? (int)K : -(int)K;
+
+    for (int i = 0; i < st.kcount; i++) {
+        if (st.klist[i] == signed_k) return i;
     }
     return -1;
 }
 
-int factor_can_be_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n) {
-    int idx = find_sequence(sequences, count, K, sign);
+int factor_can_be_used(const searchData &sd, const workStatus &st, uint32_t K, char sign, uint32_t n) {
+    int idx = find_sequence(st, K, sign);
     if (idx < 0) return 0;
-    return can_use_N(&sequences[idx], n);
+    return can_use_N(sd, st, (uint32_t)idx, n);
 }
 
-void mark_factor_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n) {
-    int idx = find_sequence(sequences, count, K, sign);
-    if (idx >= 0) mark_N_used(&sequences[idx], n);
+void mark_factor_used(searchData &sd, const workStatus &st, uint32_t K, char sign, uint32_t n) {
+    int idx = find_sequence(st, K, sign);
+    if (idx >= 0) clear_can_use(sd, st, (uint32_t)idx, n);
 }
 
+// Keep the old name if other code already calls free_sequences().
+// It now frees the single large bitmap instead of per-Sequence allocations.
 void free_sequences(searchData &sd, workStatus &st)
 {
-    for (int i = 0; i < st.kcount; ++i) {
-        if (sd.sequences[i].bitmap) {
-            free(sd.sequences[i].bitmap);
-            sd.sequences[i].bitmap = nullptr;
-            sd.sequences[i].nbits = 0;
-        }
+    if (sd.bitmap) {
+        std::free(sd.bitmap);
+        sd.bitmap = nullptr;
     }
+
+    sd.bitmap_bits_per_sequence = 0;
+    sd.bitmap_words_per_sequence = 0;
+    sd.bitmap_total_words = 0;
+
     st.kcount = 0;
 }
 
@@ -141,6 +167,12 @@ typedef struct {
 static void nvec_push(NVec *a, uint32_t x) {
     if (a->n == a->cap) {
         size_t newcap = (a->cap ? a->cap * 2 : 256);
+
+        if (newcap > ((size_t)-1) / sizeof(uint32_t)) {
+            std::fprintf(stderr, "N list allocation overflow\n");
+            std::exit(EXIT_FAILURE);
+        }
+
         uint32_t *nv = (uint32_t*)std::realloc(a->v, newcap * sizeof(uint32_t));
         if (!nv) { std::perror("realloc"); std::exit(EXIT_FAILURE); }
         a->v = nv;
@@ -223,17 +255,30 @@ void read_input(workStatus &st, searchData &sd)
         std::exit(EXIT_FAILURE);
     }
 
-//    FILE *fp = std::fopen(sd.input_file, "r");
+    // If the caller reuses searchData, release the previous bitmap first.
+    // This assumes searchData is zero-initialized before first use.
+    if (sd.bitmap) {
+        std::free(sd.bitmap);
+        sd.bitmap = nullptr;
+    }
+    sd.bitmap_bits_per_sequence = 0;
+    sd.bitmap_words_per_sequence = 0;
+    sd.bitmap_total_words = 0;
+    st.kcount = 0;
+
     char resolved_name[512];
-    boinc_resolve_filename(sd.input_file,resolved_name,sizeof(resolved_name));
-    FILE *fp = boinc_fopen(resolved_name,"r");
+    boinc_resolve_filename(sd.input_file, resolved_name, sizeof(resolved_name));
+    FILE *fp = boinc_fopen(resolved_name, "r");
 
     if (!fp) file_error_open(sd.input_file);
 
     NVec nlists[MAX_SEQUENCES];
     std::memset(nlists, 0, sizeof(nlists));
 
-    st.kcount = 0;
+    uint32_t firstN[MAX_SEQUENCES];
+    uint32_t lastN[MAX_SEQUENCES];
+    std::memset(firstN, 0, sizeof(firstN));
+    std::memset(lastN,  0, sizeof(lastN));
 
     char line[2048];
     uint64_t line_no = 0;
@@ -242,7 +287,7 @@ void read_input(workStatus &st, searchData &sd)
     uint32_t running_n = 0;    // current n for delta accumulation
 
     int32_t global_B = -1;
-    uint32_t NMIN = 0xFFFFFFFFu;
+    uint32_t NMIN = UINT32_MAX;
     uint32_t NMAX = 0;
 
     while (std::fgets(line, sizeof(line), fp)) {
@@ -267,6 +312,7 @@ void read_input(workStatus &st, searchData &sd)
                                         sd.input_file, line_no, line, current_seq,
                                         "accumulating n += delta");
 
+            lastN[current_seq] = running_n;
             nvec_push(&nlists[current_seq], running_n);
             continue;
         }
@@ -314,16 +360,12 @@ void read_input(workStatus &st, searchData &sd)
             line_error(sd.input_file, line_no, buf, line, current_seq);
         }
 
-        // New sequence starts here
+        // New sequence starts here.  No per-sequence struct is used anymore.
         current_seq = (int)st.kcount++;
-        Sequence *seq = &sd.sequences[current_seq];
-        std::memset(seq, 0, sizeof(*seq));
 
-        seq->K    = hk;
-        seq->sign = (hc > 0) ? '+' : '-';
-        seq->N0   = hn;
-
-        st.klist[current_seq] = (seq->sign == '+') ? (int)hk : -(int)hk;
+        st.klist[current_seq] = (hc > 0) ? (int)hk : -(int)hk;
+        firstN[current_seq] = hn;
+        lastN[current_seq] = hn;
 
         // Reset running_n and record N0
         running_n = hn;
@@ -342,9 +384,8 @@ void read_input(workStatus &st, searchData &sd)
         std::exit(EXIT_FAILURE);
     }
 
-    // Build bitmaps + compute lastN/NMIN/NMAX
+    // First pass: compute global NMIN/NMAX from all sequences.
     for (int i = 0; i < st.kcount; i++) {
-        Sequence *seq = &sd.sequences[i];
         NVec *nv = &nlists[i];
 
         if (nv->n == 0) {
@@ -352,54 +393,60 @@ void read_input(workStatus &st, searchData &sd)
             std::exit(EXIT_FAILURE);
         }
 
-        const uint32_t n0 = seq->N0;
-        const uint32_t lastN = nv->v[nv->n - 1];
-        seq->lastN = lastN;
-
-        if (n0 < NMIN) NMIN = n0;
-        if (lastN > NMAX) NMAX = lastN;
-
-        if (lastN < n0) {
-            std::fprintf(stderr, "%s: internal error: lastN < N0 for seq %d\n", sd.input_file, i);
+        if (lastN[i] < firstN[i]) {
+            std::fprintf(stderr, "%s: internal error: lastN < firstN for seq %d\n", sd.input_file, i);
             std::exit(EXIT_FAILURE);
         }
 
-        // nbits = (lastN - n0 + 1) in size_t; lastN>=n0 so safe
-        seq->nbits = (size_t)(lastN - n0 + 1);
-        if (seq->nbits == 0) {
-            std::fprintf(stderr, "%s: internal error: computed nbits == 0 for seq %d\n", sd.input_file, i);
-            std::exit(EXIT_FAILURE);
-        }
+        if (firstN[i] < NMIN) NMIN = firstN[i];
+        if (lastN[i]  > NMAX) NMAX = lastN[i];
+    }
 
-        seq->bitmap = init_bitmap_empty(seq->nbits);
+    // Bitmap NMIN must be even.  This may create one extra zero bit before the
+    // smallest file N value, which is exactly what we want.
+    if (NMIN & 1u) NMIN--;
+
+    st.base = (uint32_t)global_B;
+    st.nmin = NMIN;
+    st.nmax = NMAX;
+
+    const uint64_t nbits64 = (uint64_t)st.nmax - (uint64_t)st.nmin + 1u;
+    if (nbits64 == 0 || nbits64 > (uint64_t)((size_t)-1)) {
+        std::fprintf(stderr, "%s: bitmap range is too large\n", sd.input_file);
+        std::exit(EXIT_FAILURE);
+    }
+
+    sd.bitmap_bits_per_sequence = (size_t)nbits64;
+    sd.bitmap_words_per_sequence = (sd.bitmap_bits_per_sequence + 31u) >> 5;
+
+    if (sd.bitmap_words_per_sequence != 0 &&
+        (size_t)st.kcount > ((size_t)-1) / sd.bitmap_words_per_sequence) {
+        std::fprintf(stderr, "%s: bitmap total size overflow\n", sd.input_file);
+        std::exit(EXIT_FAILURE);
+    }
+
+    sd.bitmap_total_words = (size_t)st.kcount * sd.bitmap_words_per_sequence;
+    sd.bitmap = init_bitmap_words_zero(sd.bitmap_total_words);
+
+    // Second pass: set only actual N values read from the file.  Everything not
+    // read, including positions below/above each sequence's own range, remains 0.
+    for (int i = 0; i < st.kcount; i++) {
+        NVec *nv = &nlists[i];
 
         for (size_t j = 0; j < nv->n; j++) {
             uint32_t nn = nv->v[j];
-            if (nn < n0 || nn > lastN) {
-                std::fprintf(stderr, "%s: internal error: N out of range while building bitmap (seq %d)\n",
+            if (nn < firstN[i] || nn > lastN[i]) {
+                std::fprintf(stderr, "%s: internal error: N out of local sequence range while building bitmap (seq %d)\n",
                              sd.input_file, i);
                 std::exit(EXIT_FAILURE);
             }
-            size_t off = (size_t)(nn - n0);
-            if (off >= seq->nbits) {
-                std::fprintf(stderr, "%s: internal error: bitmap offset out of range (seq %d)\n",
-                             sd.input_file, i);
-                std::exit(EXIT_FAILURE);
-            }
-            set_can_use(seq->bitmap, off);
+            set_can_use(sd, st, (uint32_t)i, nn);
         }
 
         std::free(nv->v);
         nv->v = nullptr;
         nv->n = nv->cap = 0;
     }
-
-    // If NMIN is odd, reduce by 1
-    if (NMIN & 1u) NMIN--;
-
-    st.base = (uint32_t)global_B;
-    st.nmin = NMIN;
-    st.nmax = NMAX;
 
     std::printf("Sequences read: %d\n", (int)st.kcount);
     std::fprintf(stderr, "Sequences read: %d\n", (int)st.kcount);
@@ -408,7 +455,10 @@ void read_input(workStatus &st, searchData &sd)
 
 //    std::printf("NMIN = %" PRIu32 "\n", st.nmin);
 //    std::printf("NMAX = %" PRIu32 "\n", st.nmax);
-
+//    std::printf("Bitmap bits/seq = %zu\n", sd.bitmap_bits_per_sequence);
+//    std::printf("Bitmap words/seq = %zu\n", sd.bitmap_words_per_sequence);
+//    std::printf("Bitmap total words = %zu\n", sd.bitmap_total_words);
+//
 //    std::printf("klist array: ");
 //    for (int i = 0; i < st.kcount; i++) std::printf("%d ", st.klist[i]);
 //    std::printf("\n");

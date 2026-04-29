@@ -7,14 +7,10 @@
 	Required minimum OpenCL version is 1.1
 	CL_TARGET_OPENCL_VERSION 110 in simpleCL.h
 
-	Search limits:  P from 2^32 up to 2^64 and N up to 2^31
+	Search limits:  P from 3 up to 2^64 and N up to 2^31
 
 	An input file in sr2sieve/sr5sieve ABCD format is required.
 
-	P can be extended lower than 2^32 but will require handling:
-	* a very large amount of factors
-	* excessive hash table collisions/duplicates that occur with small modulus
-	It's better to use sr2sieve/sr5sieve below 2^32.
 */
 
 #include <unistd.h>
@@ -32,7 +28,7 @@ void help()
 	printf("Program usage:\n");
 	printf("-p #			Starting prime factor p\n");
 	printf("-P #			End prime factor P\n");
-	printf("			P range is 2^32 <= -p < -P < 2^64, [-p, -P) exclusive\n");
+	printf("			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive\n");
 	printf("-i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences\n");
 	printf("-h			Print this help\n");
         boinc_finish(EXIT_FAILURE);
@@ -95,14 +91,14 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
     while (token) {
 	if (strcmp(token, "-p") == 0) {
             token = strtok(NULL, " \t");
-            if (token && parse_uint64(&st->pmin, token, 0x100000000ULL, 0xFFFFFFFFFFFFFFFFULL) != 0) {
+            if (token && parse_uint64(&st->pmin, token, 3, 0xFFFFFFFFFFFFFFFFULL) != 0) {
                 fprintf(stderr, "Invalid value for -p: %s\n", token);
 		printf("Invalid value for -p: %s\n", token);
             }
         }
         else if (strcmp(token, "-P") == 0) {
             token = strtok(NULL, " \t");
-            if (token && parse_uint64(&st->pmax, token, 0x100000000ULL, 0xFFFFFFFFFFFFFFFFULL) != 0) {
+            if (token && parse_uint64(&st->pmax, token, 4, 0xFFFFFFFFFFFFFFFFULL) != 0) {
                 fprintf(stderr, "Invalid value for -P: %s\n", token);
 		printf("Invalid value for -P: %s\n", token);
             }
@@ -155,9 +151,10 @@ int main(int argc, char *argv[])
 { 
 	sclHard hardware = {};
 	searchData sd = {};
-	sd.numresults = 10000000;
 	sd.write_state_a_next = true;
 	workStatus st = {};
+
+	sd.numresults = 10000000;
 
         // Initialize BOINC
         BOINC_OPTIONS options;
@@ -249,6 +246,8 @@ int main(int argc, char *argv[])
  	char device_driver[1024];
 	cl_uint CUs;
 	cl_ulong LMS = 0;
+	cl_ulong global_mem = 0;
+	cl_ulong max_alloc = 0;
 
 	err = clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(device_name), &device_name, NULL);
 	if (err != CL_SUCCESS) {
@@ -271,6 +270,16 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	err = clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(cl_ulong), &LMS, NULL);
+	if (err != CL_SUCCESS) {
+		printf( "clGetDeviceInfo failed with %d\n", err );
+		exit(EXIT_FAILURE);
+	}
+	err = clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), &global_mem, NULL);
+	if (err != CL_SUCCESS) {
+		printf( "clGetDeviceInfo failed with %d\n", err );
+		exit(EXIT_FAILURE);
+	}
+	err = clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong), &max_alloc, NULL);
 	if (err != CL_SUCCESS) {
 		printf( "clGetDeviceInfo failed with %d\n", err );
 		exit(EXIT_FAILURE);

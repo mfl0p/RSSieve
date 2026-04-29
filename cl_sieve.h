@@ -2,13 +2,6 @@
 #define MAX_SEQUENCES 100
 
 typedef struct {
-    size_t nbits;        // bitmap bits
-    uint32_t K, N0, lastN;
-    char sign;
-    uint8_t *bitmap;     // 1 = can be used
-} Sequence;
-
-typedef struct {
 	cl_ulong p;
 	cl_int n;
 	cl_int k;
@@ -35,8 +28,11 @@ typedef struct {
 typedef struct {
 	uint32_t computeunits, numresults, range, psize, Q, m, QQ, mm, hsize, lmemsize, primes_per_bsgs, cache_k;
 	bool test, write_state_a_next, nvidia;
-	Sequence sequences[MAX_SEQUENCES];
+	size_t bitmap_bits_per_sequence;
+	size_t bitmap_words_per_sequence;
+	size_t bitmap_total_words;
 	const char *input_file;
+	uint32_t *bitmap;
 } searchData;
 
 typedef struct {
@@ -47,7 +43,8 @@ typedef struct {
 	cl_mem d_k, d_k_full, d_k_even, d_k_odd;
 	cl_mem d_kcount_full, d_kcount_even, d_kcount_odd;
 	cl_mem d_bsgs_count;
-	sclSoft setup, sort, clearn, clearresult, getsegprimes, giantparity, giantfull;
+	cl_mem d_bitmap;
+	sclSoft addsmallprimes, setup, sort, clearn, clearresult, getsegprimes, giantparity, giantfull;
 } progData;
 
 void cl_sieve( sclHard hardware, workStatus & st, searchData & sd );
@@ -55,10 +52,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd );
 void run_test( sclHard hardware, workStatus & st, searchData & sd );
 
 void read_input(workStatus & st, searchData & sd);
-
-int factor_can_be_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n);
-
-void mark_factor_used(Sequence *sequences, size_t count, uint32_t K, char sign, uint32_t n);
 
 void free_sequences(searchData &sd, workStatus &st);
 

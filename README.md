@@ -26,11 +26,11 @@ With contributions by
 command line options
 * -p #			Starting prime factor p
 * -P #			End prime factor P
-* 			P range is 2^32 <= -p < -P < 2^64, [-p, -P) exclusive
+* 			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive
 * -i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences
 * -h			Print help
 
-Note that you will need to use sr2sieve/sr5sieve for P below 2^32.
+Note that you will need to use sr2sieve/sr5sieve to generate the initial ABCD input file.
 
 Program gets the OpenCL GPU device index from BOINC.  To run stand-alone, the program will
 default to GPU 0 unless an init_data.xml is in the same directory with the format:
