@@ -53,5 +53,7 @@ void run_test( sclHard hardware, workStatus & st, searchData & sd );
 
 void read_input(workStatus & st, searchData & sd);
 
+void mark_factor_used(searchData &sd, const workStatus &st, uint32_t K, char sign, uint32_t n);
+
 void free_sequences(searchData &sd, workStatus &st);
 

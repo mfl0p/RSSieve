@@ -140,8 +140,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 #endif
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
-	uint order = l_found_order == 0xffffffffu ? 0 : l_found_order;
-//	if(!lid && order)printf("order %d\n",order);
+	int order = l_found_order == 0xffffffffu ? 0 : l_found_order;
 
 	// if order of b mod p < Q, no giant steps are needed
 	if(order){
@@ -265,10 +264,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 #endif
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
-	uint order = l_found_order == 0xffffffffu ? 0 : l_found_order;
-//	if(!lid && order)printf("orderp %d\n",order);
-
-	ulong thread_gm_step = powmodsm(prime.s5, lid, prime.s0, prime.s1, prime.s2);
+	int order = l_found_order == 0xffffffffu ? 0 : l_found_order;
 
 	// if order of b mod p < QQ, no giant steps are needed
 	if(order){
@@ -296,6 +292,8 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 	}
 	// giant steps
 	else{
+		ulong thread_gm_step = powmodsm(prime.s5, lid, prime.s0, prime.s1, prime.s2);
+
 		for(int q=lid; q<MM; q+=ls){
 			for(int i=0; i<numk; ++i){
 #if CACHEK

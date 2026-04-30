@@ -85,28 +85,46 @@ void format_eta(double seconds, char *buf)
     sprintf(buf, "%02d:%02d:%02d", h, m, s);
 }
 
-void print_progress(workStatus &st, double *smooth_rate, time_t start_time)
-{
+void print_progress(workStatus &st,
+                    double *smooth_rate,
+                    time_t start_time,
+                    uint64_t run_start_p){
     const int bar_width = 40;
 
-    double progress = (double)(st.p - st.pmin) / (double)(st.pmax - st.pmin);
+    uint64_t total_range = st.pmax - st.pmin;
+    uint64_t done_total  = st.p - st.pmin;
+
+    double progress = 0.0;
+    if(total_range > 0)
+        progress = (double)done_total / (double)total_range;
+
     if(progress < 0) progress = 0;
     if(progress > 1) progress = 1;
 
-    int pos = progress * bar_width;
+    int pos = (int)(progress * bar_width);
 
     time_t now = time(NULL);
     double elapsed = difftime(now, start_time);
 
-    double inst_rate = (st.p - st.pmin) / (elapsed > 0 ? elapsed : 1);
+    uint64_t done_this_run = 0;
+    if(st.p > run_start_p)
+        done_this_run = st.p - run_start_p;
 
-    /* exponential smoothing */
-    if(*smooth_rate == 0)
+    double inst_rate = (double)done_this_run / (elapsed > 0 ? elapsed : 1.0);
+
+    /*
+        Exponential smoothing.
+    */
+    if(*smooth_rate == 0.0)
         *smooth_rate = inst_rate;
     else
         *smooth_rate = 0.9 * (*smooth_rate) + 0.1 * inst_rate;
 
-    double remain = (st.pmax - st.p) / (*smooth_rate > 0 ? *smooth_rate : 1);
+    uint64_t remaining = 0;
+    if(st.pmax > st.p)
+        remaining = st.pmax - st.p;
+
+    double remain = (double)remaining / (*smooth_rate > 0.0 ? *smooth_rate : 1.0);
 
     char rate_str[32];
     char eta_str[32];
@@ -116,7 +134,7 @@ void print_progress(workStatus &st, double *smooth_rate, time_t start_time)
 
     printf("\r[");
 
-    for(int i=0;i<bar_width;i++)
+    for(int i = 0; i < bar_width; i++)
         putchar(i < pos ? '#' : '-');
 
     printf("] %6.2f%% | %s | ETA %s",
@@ -770,6 +788,74 @@ void finalizeResults( workStatus & st ){
 	fclose(resfile);
 }
 
+void read_factors_file_update_bitmap(searchData &sd, workStatus &st){
+
+	FILE *fp = my_fopen(RESULTS_FILENAME, "r");
+	if (fp == NULL) {
+		fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+		printf("Cannot open %s !!!\n",RESULTS_FILENAME);
+		exit(EXIT_FAILURE);
+	}
+
+	char line[512];
+	uint64_t line_number = 0;
+
+	while(fgets(line, sizeof(line), fp) != NULL) {
+		line_number++;
+
+		uint64_t p;
+		uint32_t k, b, n;
+		uint32_t c_check;
+		char bar;
+		char sign;
+		char extra;
+
+		/*
+		    Expected format:
+
+			p | k*b^n+1
+			p | k*b^n-1
+
+		    Examples:
+
+			1000133 | 91549*2^54378870+1
+			1000669 | 131179*2^72017282-1
+		*/
+		int fields = sscanf(line,
+				    " %" SCNu64 " %c "
+				    "%" SCNu32 " * "
+				    "%" SCNu32 " ^ "
+				    "%" SCNu32 " %c "
+				    "%" SCNu32 " %c",
+				    &p,
+				    &bar,
+				    &k,
+				    &b,
+				    &n,
+				    &sign,
+				    &c_check,
+				    &extra);
+
+		if(fields != 7 || bar != '|' || (sign != '+' && sign != '-') || c_check != 1 || b != st.base) {
+			fprintf(stderr, "Invalid line read in factors file %lu: %s", line_number, line);
+			printf("Invalid line read in factors file %lu: %s", line_number, line);
+			exit(EXIT_FAILURE);
+		}
+
+		mark_factor_used(sd, st, k, sign, n);
+	}
+
+	fclose(fp);
+
+	if(line_number < st.factorcount){
+		fprintf(stderr,"ERROR: Missing factors in %s !!!\n",RESULTS_FILENAME);
+		printf("ERROR: Missing factors in %s !!!\n",RESULTS_FILENAME);
+		exit(EXIT_FAILURE);
+	}
+
+	printf("Updated bitmap with %" PRIu64 " factors from %s\n",line_number,RESULTS_FILENAME);
+}
+
 // Generates a string like "__constant uint lookup[N] = {a,b,c,...};\n"
 char* generate_constant_array_string(const int *arr, size_t n, const char *name) {
     // estimate needed buffer size: each number ~11 chars, plus commas/braces, plus header
@@ -872,6 +958,12 @@ void build_giant_kernels(progData & pd, sclHard hardware, workStatus & st, searc
 			pd.giantfull.local_size[0] = 1024;
 		}
 	}
+
+	if(pd.giantparity.local_size[0] < MAX_SEQUENCES || pd.giantfull.local_size[0] < MAX_SEQUENCES){
+		fprintf(stderr,"ERROR: OpenCL device has insufficient local size config for BSGS kernel.\n");
+		printf("ERROR: OpenCL device has insufficient local size config for BSGS kernel.\n");
+		exit(EXIT_FAILURE);
+	}
 }
 
 void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
@@ -954,6 +1046,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 				fprintf(stderr,"Workunit complete.\n");
 				boinc_finish(EXIT_SUCCESS);
 			}
+
+			// need to update the factor bitmap so we don't report extra factors when resuming
+			read_factors_file_update_bitmap(sd, st);
 		}
 		// starting from beginning
 		else{
@@ -1164,6 +1259,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
 	time_t start_time = time(NULL);
 	double smooth_rate = 0;
+	uint64_t run_start_p = st.p;
 
 //	float kernel_ms;
 	const double irsize = 1.0 / (double)(st.pmax-st.pmin);
@@ -1295,7 +1391,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
     			double fd = (double)(st.p-st.pmin)*irsize;
 			boinc_fraction_done(fd);
 			if(boinc_is_standalone()){
-				print_progress(st, &smooth_rate, start_time);
+				print_progress(st, &smooth_rate, start_time, run_start_p);
 			}
 			boinc_last = time_curr;
 			int elapsed = (int)time_curr - (int)ckpt_last;
