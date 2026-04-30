@@ -30,6 +30,7 @@ void help()
 	printf("-P #			End prime factor P\n");
 	printf("			P range is 3 <= -p < -P < 2^64, [-p, -P) exclusive\n");
 	printf("-i inputfile		Use specified sr2sieve ABCD input file with a maximum of 100 sequences\n");
+	printf("-f factorfile		Override default factor file name (psp_sr2sieve.out) with specified file name.\n");
 	printf("-h			Print this help\n");
         boinc_finish(EXIT_FAILURE);
 }
@@ -112,6 +113,15 @@ void parse_cmdline_string(const char *cmdline, workStatus *st, searchData *sd)
 		}
 	    }
 	}
+	else if (strcmp(token, "-f") == 0) {
+	    token = strtok(NULL, " \t");
+	    if (token) {
+		sd->factor_file = strdup(token);  // allocate a copy
+		if (!sd->factor_file) {
+		    fprintf(stderr, "Failed to allocate memory for factor file\n");
+		}
+	    }
+	}
         else if (strcmp(token, "-s") == 0) {
             sd->test = true;
         }
@@ -182,7 +192,7 @@ int main(int argc, char *argv[])
 	}
 
 	// hack to work around invalid args when running under app_info
-	printf("%s\n",cmdline);
+//	printf("%s\n",cmdline);
 	parse_cmdline_string(cmdline, &st, &sd);
 	free(cmdline);
 
@@ -294,6 +304,7 @@ int main(int argc, char *argv[])
 
 	sd.computeunits = (uint32_t)CUs;
 	sd.lmemsize = (uint32_t)LMS;
+	sd.maxalloc = (uint64_t)max_alloc;
 
 	char intel_s[] = "Intel";
 	char arc_s[] = "Arc";

@@ -123,7 +123,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 	for(uint l = 0; l < Q; l += ls) {
 		uint j = l + lid;
 		int active = (j < Q);
-		if(active && j && gj == l_idxzero) {
+		if(active && gj == l_idxzero && j) {
 			atomic_min(&l_found_order, j);
 		}
 		barrier(CLK_LOCAL_MEM_FENCE);
@@ -140,7 +140,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantfull(
 #endif
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
-	int order = l_found_order == 0xffffffffu ? 0 : l_found_order;
+	int order = (l_found_order == 0xffffffffu) ? 0 : l_found_order;
 
 	// if order of b mod p < Q, no giant steps are needed
 	if(order){
@@ -247,7 +247,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 	for(uint l = 0; l < QQ; l += threadInc) {
 		uint j = l + threadj;
 		int active = (j < QQ);
-		if(active && j && gj == l_idxzero) {
+		if(active && gj == l_idxzero && j) {
 			atomic_min(&l_found_order, j);
 		}
 		barrier(CLK_LOCAL_MEM_FENCE);
@@ -264,7 +264,7 @@ __kernel __attribute__((work_group_size_hint(1024, 1, 1))) void giantparity(
 #endif
 	barrier(CLK_LOCAL_MEM_FENCE | CLK_GLOBAL_MEM_FENCE);
 
-	int order = l_found_order == 0xffffffffu ? 0 : l_found_order;
+	int order = (l_found_order == 0xffffffffu) ? 0 : l_found_order;
 
 	// if order of b mod p < QQ, no giant steps are needed
 	if(order){

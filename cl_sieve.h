@@ -27,11 +27,12 @@ typedef struct {
 
 typedef struct {
 	uint32_t computeunits, numresults, range, psize, Q, m, QQ, mm, hsize, lmemsize, primes_per_bsgs, cache_k;
-	bool test, write_state_a_next, nvidia;
 	size_t bitmap_bits_per_sequence;
 	size_t bitmap_words_per_sequence;
 	size_t bitmap_total_words;
-	const char *input_file;
+	uint64_t maxalloc;
+	bool test, write_state_a_next, nvidia;
+	const char *input_file, *factor_file;
 	uint32_t *bitmap;
 } searchData;
 

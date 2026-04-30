@@ -34,8 +34,6 @@
 #include "cl_sieve.h"
 #include "verify_factor.h"
 
-// res file = primegrid's sr2sieve wrapper output file
-#define RESULTS_FILENAME "psp_sr2sieve.out"
 #define STATE_FILENAME_A "stateA.ckp"
 #define STATE_FILENAME_B "stateB.ckp"
 
@@ -529,7 +527,7 @@ int factorcompare(const void *a, const void *b) {
 }
 
 
-void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardware, cl_uint * h_primecount, cl_ulong * h_sum ){
+void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardware, cl_uint *h_primecount ){
 
 	if(boinc_is_standalone()){
 		printf("\r                                                                                \r");
@@ -537,14 +535,18 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 	}
 
 	// copy total prime count to host memory, non-blocking
-	sclReadNB(hardware, sizeof(cl_ulong), pd.d_sum, h_sum);
+	cl_ulong h_sum;
+	sclReadNB(hardware, sizeof(cl_ulong), pd.d_sum, &h_sum);
+
 	// copy prime count to host memory, blocking
 	sclRead(hardware, 7*sizeof(cl_uint), pd.d_primecount, h_primecount);
 
-	st.primecount += *h_sum;
+	st.primecount += h_sum;
 	st.dupcount += h_primecount[6];
 
-	// largest kernel prime count.  used to check array bounds
+	// largest kernel prime count.  used to check array bounds.
+	// probably only works with a small overflow.
+	// large overflow will crash the program.
 	if(h_primecount[1] > sd.psize){
 		fprintf(stderr,"error: gpu prime array overflow\n");
 		printf("error: gpu prime array overflow\n");
@@ -569,6 +571,10 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 */
 	uint32_t numfactors = h_primecount[2];
 	if(numfactors){
+
+		// used to check array bounds.
+		// probably only works with a small overflow.
+		// large overflow will crash the program.
 		if(numfactors > sd.numresults){
 			fprintf(stderr,"Error: number of results (%u) overflowed array.\n", numfactors);
 			exit(EXIT_FAILURE);
@@ -609,14 +615,14 @@ void getResults( progData & pd, workStatus & st, searchData & sd, sclHard hardwa
 			else{
 				++st.factorcount;
 				if(resfile == NULL){
-					resfile = my_fopen(RESULTS_FILENAME,"a");
+					resfile = my_fopen(sd.factor_file,"a");
 					if( resfile == NULL ){
-						fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+						fprintf(stderr,"Cannot open %s !!!\n",sd.factor_file);
 						exit(EXIT_FAILURE);
 					}
 				}
 				if( fprintf( resfile, "%" PRIu64 " | %u*%u^%u%+d\n", fp, fk, st.base, fn, fc) < 0 ){
-					fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
+					fprintf(stderr,"Cannot write to %s !!!\n",sd.factor_file);
 					exit(EXIT_FAILURE);
 				}
 				// add the factor to checksum
@@ -729,7 +735,7 @@ void profileGPU(progData & pd, workStatus & st, searchData & sd, sclHard hardwar
 }
 
 
-void finalizeResults( workStatus & st ){
+void finalizeResults( workStatus & st, searchData & sd ){
 
 	char line[256];
 	uint32_t lc = 0;
@@ -737,10 +743,10 @@ void finalizeResults( workStatus & st ){
 
 	if(st.factorcount){
 		// check result file has the same number of lines as the factor count
-		resfile = my_fopen(RESULTS_FILENAME,"r");
+		resfile = my_fopen(sd.factor_file,"r");
 
 		if(resfile == NULL){
-			fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+			fprintf(stderr,"Cannot open %s !!!\n",sd.factor_file);
 			exit(EXIT_FAILURE);
 		}
 
@@ -751,36 +757,36 @@ void finalizeResults( workStatus & st ){
 		fclose(resfile);
 
 		if(lc < st.factorcount){
-			fprintf(stderr,"ERROR: Missing factors in %s !!!\n",RESULTS_FILENAME);
-			printf("ERROR: Missing factors in %s !!!\n",RESULTS_FILENAME);
+			fprintf(stderr,"ERROR: Missing factors in %s !!!\n",sd.factor_file);
+			printf("ERROR: Missing factors in %s !!!\n",sd.factor_file);
 			exit(EXIT_FAILURE);
 		}
 	}
 
 	// print checksum
-	resfile = my_fopen(RESULTS_FILENAME,"a");
+	resfile = my_fopen(sd.factor_file,"a");
 
 	if(resfile == NULL){
-		fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+		fprintf(stderr,"Cannot open %s !!!\n",sd.factor_file);
 		exit(EXIT_FAILURE);
 	}
 
 	if(!st.factorcount){
 		if( fprintf( resfile, "no factors\n" ) < 0 ){
-			fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
+			fprintf(stderr,"Cannot write to %s !!!\n",sd.factor_file);
 			exit(EXIT_FAILURE);
 		}
 	}
 /*
 	if(st.factorcount){
 		if( fprintf( resfile, "%016" PRIX64 "\n", st.checksum ) < 0 ){
-			fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
+			fprintf(stderr,"Cannot write to %s !!!\n",sd.factor_file);
 			exit(EXIT_FAILURE);
 		}
 	}
 	else{
 		if( fprintf( resfile, "no factors\n%016" PRIX64 "\n", st.checksum ) < 0 ){
-			fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
+			fprintf(stderr,"Cannot write to %s !!!\n",sd.factor_file);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -790,10 +796,10 @@ void finalizeResults( workStatus & st ){
 
 void read_factors_file_update_bitmap(searchData &sd, workStatus &st){
 
-	FILE *fp = my_fopen(RESULTS_FILENAME, "r");
+	FILE *fp = my_fopen(sd.factor_file, "r");
 	if (fp == NULL) {
-		fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
-		printf("Cannot open %s !!!\n",RESULTS_FILENAME);
+		fprintf(stderr,"Cannot open %s !!!\n",sd.factor_file);
+		printf("Cannot open %s !!!\n",sd.factor_file);
 		exit(EXIT_FAILURE);
 	}
 
@@ -837,8 +843,8 @@ void read_factors_file_update_bitmap(searchData &sd, workStatus &st){
 				    &extra);
 
 		if(fields != 7 || bar != '|' || (sign != '+' && sign != '-') || c_check != 1 || b != st.base) {
-			fprintf(stderr, "Invalid line read in factors file %lu: %s", line_number, line);
-			printf("Invalid line read in factors file %lu: %s", line_number, line);
+			fprintf(stderr, "Invalid line read in factors file %" PRIu64 ": %s", line_number, line);
+			printf("Invalid line read in factors file %" PRIu64 ": %s", line_number, line);
 			exit(EXIT_FAILURE);
 		}
 
@@ -848,12 +854,12 @@ void read_factors_file_update_bitmap(searchData &sd, workStatus &st){
 	fclose(fp);
 
 	if(line_number < st.factorcount){
-		fprintf(stderr,"ERROR: Missing factors in %s !!!\n",RESULTS_FILENAME);
-		printf("ERROR: Missing factors in %s !!!\n",RESULTS_FILENAME);
+		fprintf(stderr,"ERROR: Missing factors in %s !!!\n",sd.factor_file);
+		printf("ERROR: Missing factors in %s !!!\n",sd.factor_file);
 		exit(EXIT_FAILURE);
 	}
 
-	printf("Updated bitmap with %" PRIu64 " factors from %s\n",line_number,RESULTS_FILENAME);
+	printf("Updated bitmap with %" PRIu64 " factors from %s\n",line_number,sd.factor_file);
 }
 
 // Generates a string like "__constant uint lookup[N] = {a,b,c,...};\n"
@@ -973,13 +979,18 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	cl_int err = 0;
 
 	// read ABCD file
-	if(sd.input_file){
+	if(sd.input_file != NULL){
 		read_input(st,sd);
 	}
 	else{
 		printf("ERROR: no input file specified!\n");
 		fprintf(stderr, "ERROR: no input file specified!\n");
 		exit(EXIT_FAILURE);
+	}
+
+	// factor file = primegrid's sr2sieve wrapper output file name if not specified on cmd line
+	if(sd.factor_file == NULL){
+		sd.factor_file = "psp_sr2sieve.out";
 	}
 
 	// setup kernel parameters
@@ -998,6 +1009,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	char cldef[256];
 	snprintf(cldef, sizeof(cldef), "-DHSIZE=%d -DMASK=%d -DQ=%u -DM=%u -DKCOUNT=%d -DNMIN=%u -DNMAX=%u -DQQ=%u -DMM=%u -DBASE=%u -DLS=%u",
 		sd.hsize, sd.hsize-1, sd.Q, sd.m, st.kcount, st.nmin, st.nmax, sd.QQ, sd.mm, st.base, (uint32_t)pd.giantparity.local_size[0]);
+
 	int total_len = strlen(setup_cl) + strlen(klist) + 1;
 	char src_str[total_len];
 	snprintf(src_str, sizeof(src_str), "%s%s", klist, setup_cl);
@@ -1023,9 +1035,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	// resume from checkpoint or start new sieve
 	if( sd.test ){
 		// clear result file
-		FILE * temp_file = my_fopen(RESULTS_FILENAME,"w");
+		FILE * temp_file = my_fopen(sd.factor_file,"w");
 		if (temp_file == NULL){
-			fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+			fprintf(stderr,"Cannot open %s !!!\n",sd.factor_file);
 			exit(EXIT_FAILURE);
 		}
 		fclose(temp_file);
@@ -1053,9 +1065,9 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		// starting from beginning
 		else{
 			// clear result file
-			FILE * temp_file = my_fopen(RESULTS_FILENAME,"w");
+			FILE * temp_file = my_fopen(sd.factor_file,"w");
 			if (temp_file == NULL){
-				fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+				fprintf(stderr,"Cannot open %s !!!\n",sd.factor_file);
 				exit(EXIT_FAILURE);
 			}
 			fclose(temp_file);
@@ -1063,6 +1075,15 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 			// setup boinc trickle up... trickle 1 day after starting.
 			st.last_trickle = (uint64_t)time(NULL);
 		}
+	}
+
+	// need to increase factor buffer at low P
+	if( st.p < UINT32_MAX ){
+		sd.numresults *= 10;
+	}
+	uint64_t factor_bytes = sd.numresults * sizeof(factor); 
+	if( sd.maxalloc < factor_bytes ){
+		sd.numresults = sd.maxalloc / sizeof(factor);
 	}
 
 	// Allocate mem
@@ -1085,23 +1106,18 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
+	cl_uint * h_primecount = (cl_uint*)malloc(7 * sizeof(cl_uint));
+	if( h_primecount == NULL ){
+		fprintf(stderr,"malloc error: h_primecount\n");
+		exit(EXIT_FAILURE);
+	}
+	// device arrays
 	pd.d_bitmap = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, sd.bitmap_total_words*sizeof(cl_uint), NULL, &err );
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: d_bitmap array.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	cl_uint * h_primecount = (cl_uint*)malloc(7 * sizeof(cl_uint));
-	if( h_primecount == NULL ){
-		fprintf(stderr,"malloc error: h_primecount\n");
-		exit(EXIT_FAILURE);
-	}
-	cl_ulong * h_sum = (cl_ulong*)malloc(sizeof(cl_ulong));
-	if( h_sum == NULL ){
-		fprintf(stderr,"malloc error: h_sum\n");
-		exit(EXIT_FAILURE);
-	}
-	// device arrays
 	pd.d_k = clCreateBuffer(hardware.context, CL_MEM_READ_WRITE, sd.psize*st.kcount*sizeof(kdata), NULL, &err);
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: hash table\n");
@@ -1215,10 +1231,10 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	sclSetKernelArg(pd.getsegprimes, 3, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.getsegprimes, 4, sizeof(cl_mem), &pd.d_primecount);
 
-	int ai = 0;
 	sclSetKernelArg(pd.addsmallprimes, 2, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.addsmallprimes, 3, sizeof(cl_mem), &pd.d_primecount);
-	ai=0;
+
+	int ai=0;
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primecount);
 	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_k);
@@ -1263,6 +1279,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
 //	float kernel_ms;
 	const double irsize = 1.0 / (double)(st.pmax-st.pmin);
+	const uint32_t halfres = sd.numresults/2;
 
 	sclEnqueueKernel(hardware, pd.clearresult);
 
@@ -1309,7 +1326,7 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		sclEnqueueKernel(hardware, pd.sort);
 
 		// get counters for BSGS kernels, non blocking
-		cl_event memTransfer = sclReadNBEvent(hardware, 6*sizeof(uint32_t), pd.d_primecount, h_primecount);
+		cl_event memTransfer = sclReadNBEvent(hardware, 7*sizeof(uint32_t), pd.d_primecount, h_primecount);
 
 		// hide transfer latency with one bsgs kernel
 		uint32_t ppos_start = 0;
@@ -1386,25 +1403,24 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 		st.p = stop;
 
 		time(&time_curr);
+		// update BOINC fraction done every 2 sec
 		if( ((int)time_curr - (int)boinc_last) > 1 ){
-			// update BOINC fraction done every 2 sec
     			double fd = (double)(st.p-st.pmin)*irsize;
 			boinc_fraction_done(fd);
 			if(boinc_is_standalone()){
 				print_progress(st, &smooth_rate, start_time, run_start_p);
 			}
 			boinc_last = time_curr;
-			int elapsed = (int)time_curr - (int)ckpt_last;
-			if( (elapsed > 60) || (h_primecount[2] > sd.numresults/2) ){
-				// checkpoint at 1 minute or factor array is half full
-				sleepCPU(hardware);
-				boinc_begin_critical_section();
-				getResults(pd, st, sd, hardware, h_primecount, h_sum);
-				boinc_end_critical_section();
-				ckpt_last = time_curr;
-				// clear result arrays
-				sclEnqueueKernel(hardware, pd.clearresult);
-			}
+		}
+
+		// checkpoint at 1 minute or factor array is half full
+		if( ((int)time_curr - (int)ckpt_last) > 60 || h_primecount[2] > halfres ){
+			sleepCPU(hardware);
+			boinc_begin_critical_section();
+			getResults(pd, st, sd, hardware, h_primecount);
+			boinc_end_critical_section();
+			ckpt_last = time_curr;
+			sclEnqueueKernel(hardware, pd.clearresult);
 		}
 
 	}
@@ -1414,8 +1430,8 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 	boinc_begin_critical_section();
 	st.p = st.pmax;
 	boinc_fraction_done(1.0);
-	getResults(pd, st, sd, hardware, h_primecount, h_sum);
-	finalizeResults(st);
+	getResults(pd, st, sd, hardware, h_primecount);
+	finalizeResults(st,sd);
 	boinc_end_critical_section();
 
 	fprintf(stderr,"Sieve complete.\nfactors %" PRIu64 ", prime count %" PRIu64 ", duplicate factors %" PRIu64 "\n", st.factorcount, st.primecount, st.dupcount);
@@ -1429,7 +1445,6 @@ void cl_sieve( sclHard hardware, workStatus & st, searchData & sd ){
 
 	// cleanup
 	free(h_primecount);
-	free(h_sum);
 	free_sequences(sd, st);
 	cleanup(pd, sd, st);
 
